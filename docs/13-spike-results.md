@@ -333,3 +333,52 @@ Two things this cost, worth remembering:
 
 Full-import peak still scales with the session, because the trace being built is
 held until it is written. That is the accumulated product, not the parser.
+
+## Replay seek and reconstruction
+
+docs/00 budgets reconstructing any indexed text file at **under 100 ms p95**, and
+docs/11 makes reference-fixture seek a Phase 2 exit criterion. Measured with
+`scripts/norn.sh bench <trace.norn>`, release build, on the machine above.
+
+Reference tier: 69,354 events, 7,162 mutations, 74 MB trace.
+
+| Pattern | n | p50 | p95 | max |
+| --- | ---: | ---: | ---: | ---: |
+| forward step | 2,388 | 0.052 ms | 0.064 ms | 0.093 ms |
+| backward step | 2,387 | 2.161 ms | 4.143 ms | 4.728 ms |
+| random seek | 2,000 | 2.301 ms | 4.277 ms | 6.024 ms |
+| end-to-end jump | 256 | 2.215 ms | 4.021 ms | 4.206 ms |
+| **seek + resolve** | 2,000 | 2.240 ms | **4.278 ms** | 5.786 ms |
+| resolve only | 2,000 | 0.004 ms | 0.006 ms | 0.019 ms |
+
+Session setup — baseline, timeline, and snapshots — is 139 ms, paid once when a
+trace opens rather than per seek.
+
+**4.28 ms p95 against a 100 ms budget**, roughly 23x headroom. 1,998 of 2,000
+resolves returned content, 17.4 MB in total, so the number reflects real
+reconstruction rather than empty lookups.
+
+Forward stepping is forty times cheaper than any other pattern because it
+replays one mutation from where the engine already sits. Everything else pays a
+snapshot restore plus up to `SNAPSHOT_INTERVAL` replays, which is what the
+interval is tuned against — and why the three non-sequential patterns all land
+within a millisecond of each other regardless of distance.
+
+`resolve` on an already-positioned engine is effectively free. Reconstruction
+cost is seeking, not reading.
+
+### Two measurement traps this hit
+
+- **Seek alone is not the budgeted operation.** The first version measured
+  `seek` and reported 0.079 ms p95 — true, and irrelevant: seek only moves a
+  path map. The budget is about producing file content, which is `seek` plus
+  `resolve`. Measuring the wrong operation would have claimed a 1200x margin.
+- **Fixture content has to be realistic.** With the generator's original 36-byte
+  stub files the same benchmark reported 0.081 ms p95. Nothing was wrong with
+  the harness; the input simply had no content to reconstruct. Generated files
+  are now 200-600 lines, which moved the measurement by 50x.
+
+Also hit, for the third time in this project: Odin pads numeric format verbs
+with **zeros**, so `%-6d` printed a sample count of 2373 as "237300" and
+`%8.3f` printed 0.041 as "0000.041". Every aligned numeric column must be
+formatted to a string first.
