@@ -200,6 +200,7 @@ SCHEMA_EDGES     :: u16(1)
 SCHEMA_BLOBS        :: u16(1)
 SCHEMA_BLOB_CONTENT :: u16(1)
 SCHEMA_MUTATIONS    :: u16(1)
+SCHEMA_PAYLOADS     :: u16(1)
 SCHEMA_DIRECTORY    :: u16(1)
 
 // Directory_Entry locates one chunk. The directory is sorted by kind then

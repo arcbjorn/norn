@@ -30,6 +30,7 @@ Trace_Content :: struct {
 	events:     []model.Event,
 	edges:      []model.Edge,
 	mutations:  []model.Mutation,
+	payloads:   ^model.Payload_Tables,
 }
 
 // Writer accumulates the file image in memory and tracks chunk locations for
@@ -215,6 +216,24 @@ writer_write_content :: proc(writer: ^Writer, content: ^Trace_Content) -> core.E
 		clear(&scratch)
 		encode_edges(&scratch, content.edges)
 		write_chunk(writer, .Edges, SCHEMA_EDGES, u32(len(content.edges)), 0, 0, scratch[:]) or_return
+	}
+
+	// Payloads. Written even when every group is empty so a reader always
+	// finds the group counts and need not treat absence as a special case.
+	if content.payloads != nil {
+		clear(&scratch)
+		encode_payloads(&scratch, content.payloads)
+		write_chunk(
+			writer,
+			.Payloads,
+			SCHEMA_PAYLOADS,
+			u32(len(content.payloads.diagnostics) + len(content.payloads.commands) +
+				len(content.payloads.tests) + len(content.payloads.messages) +
+				len(content.payloads.tools)),
+			0,
+			0,
+			scratch[:],
+		) or_return
 	}
 
 	// Mutations. Written before blobs only for readability of the file layout;

@@ -41,6 +41,7 @@ Trace :: struct {
 	events:    [dynamic]model.Event,
 	edges:     [dynamic]model.Edge,
 	mutations: [dynamic]model.Mutation,
+	payloads:  model.Payload_Tables,
 
 	// Payload of the blob content chunk, borrowed from `data`. Blob bytes are
 	// resolved out of this on demand rather than copied at open time.
@@ -56,6 +57,7 @@ trace_destroy :: proc(trace: ^Trace) {
 	delete(trace.events)
 	delete(trace.edges)
 	delete(trace.mutations)
+	model.payload_tables_destroy(&trace.payloads)
 	trace^ = {}
 }
 
@@ -216,6 +218,7 @@ open_trace :: proc(
 	trace.edges = make([dynamic]model.Edge, 0, 64, allocator)
 	model.blob_table_init(&trace.blobs, allocator)
 	model.string_table_init(&trace.strings, allocator)
+	model.payload_tables_init(&trace.payloads, allocator)
 
 	defer if !core.ok(err) {
 		trace_destroy(&trace)
@@ -269,6 +272,9 @@ open_trace :: proc(
 
 		case .Edges:
 			decode_edges(payload, &trace.edges, limits) or_return
+
+		case .Payloads:
+			decode_payloads(payload, &trace.payloads, limits) or_return
 
 		case .Mutations:
 			decode_mutations(payload, &trace.mutations, limits) or_return

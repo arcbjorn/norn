@@ -528,6 +528,233 @@ decode_edges :: proc(
 }
 
 // ---------------------------------------------------------------------------
+// Payloads
+// ---------------------------------------------------------------------------
+
+// encode_payloads writes every typed payload group into one chunk.
+//
+// The groups share a chunk because they are read together: opening a trace
+// loads all payload tables, and splitting them would multiply chunk overhead
+// without giving any query a smaller thing to read. Each group declares its
+// own count so a future minor version can append a group.
+encode_payloads :: proc(buffer: ^[dynamic]u8, tables: ^model.Payload_Tables) {
+	cursor := Writer_Cursor{data = buffer}
+
+	write_u32(&cursor, u32(len(tables.diagnostics)))
+	write_u32(&cursor, u32(len(tables.commands)))
+	write_u32(&cursor, u32(len(tables.tests)))
+	write_u32(&cursor, u32(len(tables.messages)))
+	write_u32(&cursor, u32(len(tables.tools)))
+	write_u32(&cursor, u32(len(tables.arguments)))
+
+	for payload in tables.diagnostics {
+		write_u8(&cursor, u8(payload.severity))
+		write_zeros(&cursor, 3) // Reserved.
+		write_u64(&cursor, u64(payload.path))
+		write_u64(&cursor, u64(payload.symbol))
+		write_u32(&cursor, payload.line)
+		write_u32(&cursor, payload.column)
+		write_u32(&cursor, payload.end_line)
+		write_u32(&cursor, u32(payload.code))
+		write_u32(&cursor, u32(payload.message))
+	}
+
+	for payload in tables.commands {
+		write_u64(&cursor, u64(payload.command))
+		write_u64(&cursor, u64(payload.working_directory))
+		write_u32(&cursor, u32(payload.command_line))
+		write_u32(&cursor, payload.argv_start)
+		write_u32(&cursor, payload.argv_count)
+		write_u32(&cursor, u32(payload.exit_code))
+		write_u8(&cursor, u8(payload.status))
+		write_u8(&cursor, payload.has_argv ? 1 : 0)
+		write_zeros(&cursor, 2) // Reserved.
+	}
+
+	for payload in tables.tests {
+		write_u64(&cursor, u64(payload.test_case))
+		write_u64(&cursor, u64(payload.suite))
+		write_u64(&cursor, u64(payload.command))
+		write_u32(&cursor, u32(payload.message))
+		write_u32(&cursor, payload.line)
+		// path and status share the tail of the row.
+		write_u64(&cursor, u64(payload.path))
+		write_u8(&cursor, u8(payload.status))
+		write_zeros(&cursor, 7) // Reserved.
+	}
+
+	for payload in tables.messages {
+		write_u32(&cursor, u32(payload.text))
+		write_u32(&cursor, u32(payload.summary))
+		write_u64(&cursor, u64(payload.model))
+		write_u8(&cursor, payload.goal_bearing ? 1 : 0)
+		write_zeros(&cursor, 7) // Reserved.
+	}
+
+	for payload in tables.tools {
+		write_u64(&cursor, u64(payload.tool))
+		write_u32(&cursor, u32(payload.call_id))
+		write_u32(&cursor, u32(payload.content))
+		write_u32(&cursor, u32(payload.error_message))
+		write_u8(&cursor, payload.structured ? 1 : 0)
+		write_u8(&cursor, u8(payload.status))
+		write_zeros(&cursor, 6) // Reserved.
+	}
+
+	for argument in tables.arguments {
+		write_u32(&cursor, u32(argument))
+	}
+}
+
+// Row widths as actually written above, so the decoder's extent check matches
+// the encoder without either drifting.
+@(private)
+DIAGNOSTIC_ROW_STORED :: 4 + 8 + 8 + 4 + 4 + 4 + 4 + 4 // 40
+@(private)
+COMMAND_ROW_STORED :: 8 + 8 + 4 + 4 + 4 + 4 + 1 + 1 + 2 // 36
+@(private)
+TEST_ROW_STORED :: 8 + 8 + 8 + 4 + 4 + 8 + 1 + 7 // 48
+@(private)
+MESSAGE_ROW_STORED :: 4 + 4 + 8 + 1 + 7 // 24
+@(private)
+TOOL_ROW_STORED :: 8 + 4 + 4 + 4 + 1 + 1 + 6 // 28
+
+decode_payloads :: proc(
+	payload: []byte,
+	tables: ^model.Payload_Tables,
+	limits := core.DEFAULT_LIMITS,
+) -> core.Error {
+	cursor := Reader_Cursor{data = payload}
+
+	counts: [6]u32
+	for index in 0 ..< 6 {
+		value, ok := read_u32(&cursor)
+		if !ok {
+			return core.err_make(.Truncated_Input, "payloads chunk is missing its counts")
+		}
+		counts[index] = value
+	}
+
+	// Every group's extent is summed and bounds-checked before a single row is
+	// read, so a declared count that exceeds the payload is rejected once.
+	widths := [?]u64 {
+		DIAGNOSTIC_ROW_STORED,
+		COMMAND_ROW_STORED,
+		TEST_ROW_STORED,
+		MESSAGE_ROW_STORED,
+		TOOL_ROW_STORED,
+		4, // Argument entries.
+	}
+	total := u64(0)
+	for index in 0 ..< 6 {
+		if err := core.check_limit(
+			u64(counts[index]),
+			limits.max_event_count,
+			"payloads chunk exceeds the row-count limit",
+		); !core.ok(err) {
+			return err
+		}
+		span, mul_ok := core.mul_u64(u64(counts[index]), widths[index])
+		if !mul_ok {
+			return core.err_make(.Limit_Exceeded, "payloads chunk group size overflows")
+		}
+		sum, sum_ok := core.add_u64(total, span)
+		if !sum_ok {
+			return core.err_make(.Limit_Exceeded, "payloads chunk size overflows")
+		}
+		total = sum
+	}
+	if !core.range_within(u64(cursor.offset), total, u64(len(payload))) {
+		return core.err_make(.Truncated_Input, "payloads chunk is shorter than it declares")
+	}
+
+	for _ in 0 ..< int(counts[0]) {
+		row: model.Diagnostic_Payload
+		raw8, _ := read_u8(&cursor)
+		row.severity = model.Severity(raw8)
+		_ = skip(&cursor, 3)
+		raw64: u64
+		raw32: u32
+		raw64, _ = read_u64(&cursor); row.path = model.Entity_Id(raw64)
+		raw64, _ = read_u64(&cursor); row.symbol = model.Entity_Id(raw64)
+		row.line, _ = read_u32(&cursor)
+		row.column, _ = read_u32(&cursor)
+		row.end_line, _ = read_u32(&cursor)
+		raw32, _ = read_u32(&cursor); row.code = model.String_Id(raw32)
+		raw32, _ = read_u32(&cursor); row.message = model.String_Id(raw32)
+		append(&tables.diagnostics, row)
+	}
+
+	for _ in 0 ..< int(counts[1]) {
+		row: model.Command_Payload
+		raw64: u64
+		raw32: u32
+		raw8: u8
+		raw64, _ = read_u64(&cursor); row.command = model.Entity_Id(raw64)
+		raw64, _ = read_u64(&cursor); row.working_directory = model.Entity_Id(raw64)
+		raw32, _ = read_u32(&cursor); row.command_line = model.String_Id(raw32)
+		row.argv_start, _ = read_u32(&cursor)
+		row.argv_count, _ = read_u32(&cursor)
+		raw32, _ = read_u32(&cursor); row.exit_code = i32(raw32)
+		raw8, _ = read_u8(&cursor); row.status = model.Outcome_Status(raw8)
+		raw8, _ = read_u8(&cursor); row.has_argv = raw8 != 0
+		_ = skip(&cursor, 2)
+		append(&tables.commands, row)
+	}
+
+	for _ in 0 ..< int(counts[2]) {
+		row: model.Test_Payload
+		raw64: u64
+		raw32: u32
+		raw8: u8
+		raw64, _ = read_u64(&cursor); row.test_case = model.Entity_Id(raw64)
+		raw64, _ = read_u64(&cursor); row.suite = model.Entity_Id(raw64)
+		raw64, _ = read_u64(&cursor); row.command = model.Entity_Id(raw64)
+		raw32, _ = read_u32(&cursor); row.message = model.String_Id(raw32)
+		row.line, _ = read_u32(&cursor)
+		raw64, _ = read_u64(&cursor); row.path = model.Entity_Id(raw64)
+		raw8, _ = read_u8(&cursor); row.status = model.Outcome_Status(raw8)
+		_ = skip(&cursor, 7)
+		append(&tables.tests, row)
+	}
+
+	for _ in 0 ..< int(counts[3]) {
+		row: model.Message_Payload
+		raw64: u64
+		raw32: u32
+		raw8: u8
+		raw32, _ = read_u32(&cursor); row.text = model.Blob_Id(raw32)
+		raw32, _ = read_u32(&cursor); row.summary = model.String_Id(raw32)
+		raw64, _ = read_u64(&cursor); row.model = model.Entity_Id(raw64)
+		raw8, _ = read_u8(&cursor); row.goal_bearing = raw8 != 0
+		_ = skip(&cursor, 7)
+		append(&tables.messages, row)
+	}
+
+	for _ in 0 ..< int(counts[4]) {
+		row: model.Tool_Payload
+		raw64: u64
+		raw32: u32
+		raw8: u8
+		raw64, _ = read_u64(&cursor); row.tool = model.Entity_Id(raw64)
+		raw32, _ = read_u32(&cursor); row.call_id = model.String_Id(raw32)
+		raw32, _ = read_u32(&cursor); row.content = model.Blob_Id(raw32)
+		raw32, _ = read_u32(&cursor); row.error_message = model.String_Id(raw32)
+		raw8, _ = read_u8(&cursor); row.structured = raw8 != 0
+		raw8, _ = read_u8(&cursor); row.status = model.Outcome_Status(raw8)
+		_ = skip(&cursor, 6)
+		append(&tables.tools, row)
+	}
+
+	for _ in 0 ..< int(counts[5]) {
+		value, _ := read_u32(&cursor)
+		append(&tables.arguments, model.String_Id(value))
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------
 
