@@ -180,14 +180,16 @@ would look wrong.
 scripts/norn.sh test
 ```
 
-550 tests across eleven packages, 49 CLI contract checks, and 122 security
-checks. The security gate runs every fixture in `tests/fixtures/hostile` through
+559 tests across eleven packages, plus 49 CLI contract checks, 122 security
+checks, and 5 fixture-determinism checks. The security gate runs every fixture in `tests/fixtures/hostile` through
 the built binary and asserts outcomes rather than mechanisms: no sentinel file
 was created, the repository hash is unchanged, no export leaked a secret or
 produced active markup, memory stayed bounded. It found a buffer overflow in
 JSON string decoding on its first run.
 
-See [Quality](docs/09-quality.md) for the test layers and release gates, and
+Fixture provenance and the expected hashes are in
+[tests/fixtures](tests/fixtures/README.md). See
+[Quality](docs/09-quality.md) for the test layers and release gates, and
 [Engineering notes](docs/13-engineering-notes.md) for measurements and the
 mistakes behind them.
 
