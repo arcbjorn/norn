@@ -344,7 +344,10 @@ write_edit :: proc(
 	id := next(random)
 
 	previous, existed := contents[path]
-	after := fmt.aprintf("// revision %d\\npackage generated\\n", next(random) % 100000)
+	// A realistic source file, not a stub. docs/09 uses these fixtures for the
+	// performance gates, and a 36-byte file measures nothing about
+	// reconstructing, diffing, or hashing the sizes a real repository holds.
+	after := generate_source(random, path)
 
 	fmt.sbprintfln(
 		builder,
@@ -383,6 +386,54 @@ write_edit :: proc(
 		id,
 	)
 	return 3
+}
+
+// FILE_LINES bounds a generated file.
+//
+// Around 200-600 lines, which is the range the files in this repository
+// actually occupy. Large enough that content handling is measured, small enough
+// that the stress tier stays a file rather than a disk image.
+FILE_MIN_LINES :: 200
+FILE_LINE_SPAN :: 400
+
+@(private)
+LINE_FORMS := []string {
+	"\\t\\tif index >= len(buffer) {",
+	"\\t\\t\\treturn 0, false",
+	"\\t\\t}",
+	"\\tvalue := compute(index, offset)",
+	"\\t// The bound is checked before the read, not after.",
+	"\\tresult += u64(value) * scale",
+	"\\tfor entry in entries {",
+	"\\t\\ttotal += entry.size",
+	"\\t}",
+	"",
+}
+
+// generate_source builds a deterministic file body.
+//
+// Keyed off the path as well as the generator state, so two different files are
+// not byte-identical — which would let content-addressed storage dedupe them
+// and make the fixture measure one file instead of many.
+@(private)
+generate_source :: proc(random: ^Random, path: string) -> string {
+	lines := FILE_MIN_LINES + below(random, FILE_LINE_SPAN)
+
+	builder := strings.builder_make()
+	fmt.sbprintf(&builder, "// %s\\n", path)
+	fmt.sbprintf(&builder, "// revision %d\\n", next(random) % 1_000_000)
+	strings.write_string(&builder, "package generated\\n\\n")
+
+	for index in 0 ..< lines {
+		form := LINE_FORMS[index %% len(LINE_FORMS)]
+		if form == "" {
+			strings.write_string(&builder, "\\n")
+			continue
+		}
+		fmt.sbprintf(&builder, "%s\\n", form)
+	}
+
+	return strings.to_string(builder)
 }
 
 @(private)
