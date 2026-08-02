@@ -37,6 +37,8 @@ main :: proc() {
 		os.exit(command_inspect(rest))
 	case "validate":
 		os.exit(command_validate(rest))
+	case "explain":
+		os.exit(command_explain(rest))
 	case "version", "--version", "-v":
 		fmt.println(VERSION)
 		os.exit(EXIT_OK)
@@ -56,6 +58,8 @@ print_usage :: proc(to_stderr: bool) {
 Usage:
   norn inspect <trace.norn> [--json]
   norn validate <trace.norn> [--mode quick|full|replay]
+  norn explain <trace.norn> --event <id>
+  norn explain <trace.norn> --list
   norn version
 
 Commands not yet implemented in this build:

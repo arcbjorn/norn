@@ -10,8 +10,8 @@ The full specification lives in [`docs/`](docs/README.md). Start with
 ## Status
 
 Early implementation. The canonical trace model, the `.norn` container codec,
-the replay engine, and the `inspect` and `validate` CLI commands work. The
-importer and native UI are not built yet.
+the replay engine, evidence analysis, and the `inspect`, `validate`, and
+`explain` CLI commands work. The importer and native UI are not built yet.
 
 | Area | State |
 | --- | --- |
@@ -22,9 +22,13 @@ importer and native UI are not built yet.
 | Virtual repository and mutation replay | Implemented |
 | Strict unified-patch application | Implemented |
 | Snapshots, seeking, and range comparison | Implemented |
-| `norn inspect` / `norn validate` (all three modes) | Implemented |
+| Typed event payloads (diagnostics, commands, tests) | Implemented |
+| Comparable outcomes and candidate windows | Implemented |
+| Versioned contributor scoring and evidence stacks | Implemented |
+| Attempt and retry-loop detection | Implemented |
+| `norn inspect` / `validate` / `explain` | Implemented |
 | Codex importer | Not started |
-| Analysis and contributor scoring | Not started |
+| Export and diagnostic bundles | Not started |
 | Native UI (SDL3 + WGPU) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
@@ -60,7 +64,14 @@ The product CLI:
 ```sh
 norn inspect <trace.norn> [--json]
 norn validate <trace.norn> [--mode quick|full|replay]
+norn explain <trace.norn> --list
+norn explain <trace.norn> --event <id>
 ```
+
+`explain` is the diagnosis workflow: select a failed outcome and it reports the
+evidence behind it, separated into explicit, reconstructed, and inferred
+levels, with every candidate score expanding into the deterministic rules that
+produced it. Candidates are labeled candidates, never causes.
 
 Machine-readable output goes to stdout and diagnostics to stderr, so
 `norn inspect --json` can be piped without filtering. Exit codes: `0` success,
@@ -77,11 +88,13 @@ src/
     model/       canonical semantic types, interning, blobs
     codec/       .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison
+  analysis/      outcomes, comparability, scoring, evidence, attempts
 tests/
   core/    arithmetic, path safety, checksum vectors
   model/   interning and blob identity
   codec/   roundtrip, determinism, and corruption fixtures
   replay/  patching, mutation chains, and seek properties
+  analysis/ comparability, scoring weights, and evidence ordering
 scripts/  repeatable developer commands
 ```
 
@@ -115,5 +128,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-112 tests across four packages. See [Quality](docs/09-quality.md) for the
+146 tests across five packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
