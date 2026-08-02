@@ -27,6 +27,7 @@ Commands:
   test [package]      Run tests for one package, or every package
   check               Type-check every package without producing binaries
   format-check        Verify formatting is unchanged
+  spike <name> [args]  Build and run a phase-zero spike (graphics)
   clean               Remove build and artifact directories
 EOF
 }
@@ -151,6 +152,26 @@ cmd_format_check() {
 	odinfmt -l "${ROOT}/src" "${ROOT}/tests"
 }
 
+# Spikes are throwaway validation programs, not product code. docs/11: the
+# spike code may be discarded; its measurements and decisions remain.
+cmd_spike() {
+	require_odin
+	local name="${1:-}"
+	if [[ -z "${name}" ]]; then
+		echo "error: spike requires a name (graphics)" >&2
+		exit 2
+	fi
+	shift
+	local dir="${ROOT}/spike/${name}"
+	if [[ ! -d "${dir}" ]]; then
+		echo "error: no spike named '${name}'" >&2
+		exit 2
+	fi
+	mkdir -p "${ARTIFACTS_DIR}"
+	odin build "${dir}" "${COLLECTION[@]}" -o:speed -out:"${ARTIFACTS_DIR}/spike_${name}"
+	"${ARTIFACTS_DIR}/spike_${name}" "$@"
+}
+
 cmd_clean() {
 	rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}"
 	echo "removed build and artifact directories"
@@ -165,6 +186,7 @@ main() {
 		test)         cmd_test "$@" ;;
 		check)        cmd_check "$@" ;;
 		format-check) cmd_format_check "$@" ;;
+		spike)        cmd_spike "$@" ;;
 		clean)        cmd_clean "$@" ;;
 		-h|--help|help|"") usage ;;
 		*)
