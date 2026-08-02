@@ -181,6 +181,13 @@ cmd_test() {
 		if ! "${ROOT}/scripts/test-security.sh"; then
 			failed=1
 		fi
+
+		# Every performance figure in docs/13 was measured against generated
+		# fixtures, so a generator that drifts silently invalidates them.
+		echo "== fixtures"
+		if ! "${ROOT}/scripts/test-fixtures.sh"; then
+			failed=1
+		fi
 	fi
 
 	return "${failed}"
