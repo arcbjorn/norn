@@ -154,6 +154,15 @@ add_mutation :: proc(
 	return event
 }
 
+// add_event_of_kind records a bare event naming a subject.
+add_event_of_kind :: proc(
+	builder: ^Builder,
+	kind: model.Event_Kind,
+	primary: model.Entity_Id,
+) -> model.Event_Id {
+	return push_event(builder, kind, primary = primary)
+}
+
 // add_diagnostic records a compiler or linter message naming a location.
 add_diagnostic :: proc(
 	builder: ^Builder,
