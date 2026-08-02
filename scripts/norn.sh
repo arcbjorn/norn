@@ -106,10 +106,12 @@ cmd_test() {
 	require_odin
 	mkdir -p "${ARTIFACTS_DIR}"
 	local packages
+	local all=0
 	if [[ $# -gt 0 ]]; then
 		packages="$*"
 	else
 		packages="$(test_packages)"
+		all=1
 	fi
 	local failed=0
 	for package in ${packages}; do
@@ -124,6 +126,17 @@ cmd_test() {
 			failed=1
 		fi
 	done
+
+	# The CLI contract — exit codes, stream separation, argument parsing — is
+	# only observable from the built binary, so it is checked separately.
+	if [[ "${all}" == 1 ]]; then
+		echo "== cli"
+		cmd_build debug >/dev/null || return 1
+		if ! "${ROOT}/scripts/test-cli.sh"; then
+			failed=1
+		fi
+	fi
+
 	return "${failed}"
 }
 
