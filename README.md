@@ -42,6 +42,7 @@ requirement in the adapter contract and generates the fixture tiers.
 | Baseline verification against recorded digests | Implemented |
 | Search and composable filters | Implemented |
 | Search bar with removable filter chips | Implemented |
+| Search text entry and empty-panel explanations | Implemented |
 | NSL adapter and deterministic fixture generator | Implemented |
 | `norn import` | Implemented |
 | Codex adapter (needs real sample traces) | Not started |
@@ -245,7 +246,7 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-525 tests across eleven packages, plus 49 CLI contract checks and 122 security
+537 tests across eleven packages, plus 49 CLI contract checks and 122 security
 checks against the hostile fixtures. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
 
