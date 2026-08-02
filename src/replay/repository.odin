@@ -154,12 +154,11 @@ state_put :: proc(state: ^Repository_State, value: Path_State) {
 
 // Baseline_Entry is one path whose content or absence was actually verified at
 // session start.
-Baseline_Entry :: struct {
-	path:     model.Entity_Id,
-	content:  model.Blob_Id,
-	exists:   bool,
-	encoding: model.Text_Encoding,
-}
+//
+// An alias rather than a second definition: the codec reads these off disk and
+// the engine consumes them, so two structs that had to agree field for field
+// would eventually not.
+Baseline_Entry :: model.Baseline_Entry
 
 // Baseline is the manifest of what was observed before the session began.
 //

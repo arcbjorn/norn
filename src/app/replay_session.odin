@@ -70,10 +70,12 @@ replay_session_init :: proc(
 		allocator,
 	)
 
-	// The trace carries no baseline manifest yet: capturing one is the
-	// importer's job. Replay therefore starts from nothing, which makes a
-	// patch against an unseen file a missing-baseline gap. That is the honest
-	// result, and the diff panel labels it as such.
+	// The baseline manifest the importer captured. A trace without one replays
+	// from nothing, which makes a patch against a pre-existing file a
+	// missing-baseline gap — still the honest result, just a weaker one.
+	for entry in trace.baseline {
+		append(&session.baseline.entries, entry)
+	}
 
 	source := replay.Content_Source {
 		user_data = trace,

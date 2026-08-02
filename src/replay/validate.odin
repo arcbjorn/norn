@@ -50,14 +50,16 @@ validate_replay :: proc(
 		},
 	}
 
-	// The trace records no baseline manifest yet: capturing one is the
-	// importer's job, and the importer does not exist. Replay therefore starts
-	// from nothing, which makes every patch against an unseen file a
-	// missing-baseline gap. That is the honest result for a trace that carries
-	// no baseline, and it changes once the importer records one.
+	// The baseline manifest the importer captured, if any. A trace without one
+	// replays from nothing, which makes a patch against a pre-existing file a
+	// missing-baseline gap — the honest result for a trace that carries no
+	// baseline, and a weaker one than a captured baseline gives.
 	baseline: Baseline
 	baseline_init(&baseline, baseline_kind_from_metadata(trace.metadata.baseline_kind), allocator)
 	defer baseline_destroy(&baseline)
+	for entry in trace.baseline {
+		append(&baseline.entries, entry)
+	}
 
 	engine: Engine
 	engine_init(&engine, source, allocator)
