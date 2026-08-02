@@ -244,6 +244,86 @@ main() {
 		failed=1
 	fi
 
+	# The end-to-end scenario from docs/09: import, validate, reopen, seek,
+	# reconstruct, select a failing outcome, obtain candidates, export, and
+	# validate the manifest. Steps 1-5 are covered above; these are 6-9.
+	local e2e="${scratch}/e2e.jsonl"
+	{
+		echo '{"type":"session","nsl_version":1,"started_at":1000}'
+		echo '{"type":"message","t":1100,"role":"user","text":"fix the build"}'
+		echo '{"type":"file","t":1200,"op":"create","path":"a.odin","after":"package a\n"}'
+		echo '{"type":"file","t":1300,"op":"modify","path":"a.odin","before":"package a\n","after":"package a\nbroken\n"}'
+		echo '{"type":"command","t":1400,"command":"odin build a.odin","exit":1,"output":"error"}'
+		echo '{"type":"test","t":1500,"name":"builds","suite":"s","status":"fail","message":"no"}'
+	} >"${e2e}"
+
+	"${NORN}" import "${e2e}" --repo "${ROOT}" --out "${scratch}/e2e.norn" >/dev/null 2>&1
+
+	# A failing outcome must be listed, and must be selectable by event.
+	checks=$((checks + 1))
+	e2e_list="$("${NORN}" explain "${scratch}/e2e.norn" --list 2>/dev/null)"
+	if [[ "${e2e_list}" != *"failed"* ]]; then
+		echo "FAIL: explain --list did not report the failing outcome"
+		failed=1
+	fi
+
+	# Candidates must come back with their relationship kind, which docs/04
+	# requires the UI to distinguish.
+	checks=$((checks + 1))
+	e2e_event="$(echo "${e2e_list}" | awk '$3=="failed"{print $1; exit}')"
+	if [[ -z "${e2e_event}" ]]; then
+		echo "FAIL: no failing event to explain"
+		failed=1
+	else
+		e2e_why="$("${NORN}" explain "${scratch}/e2e.norn" --event "${e2e_event}" 2>/dev/null)"
+		checks=$((checks + 1))
+		if [[ "${e2e_why}" != *"explicit"* ]]; then
+			echo "FAIL: explain produced no explicit evidence"
+			failed=1
+		fi
+	fi
+
+	expect_code 0 "exporting a report" -- \
+		"${NORN}" export "${scratch}/e2e.norn" --out "${scratch}/exp"
+
+	checks=$((checks + 1))
+	if [[ ! -s "${scratch}/exp/export.json" || ! -s "${scratch}/exp/report.html" ]]; then
+		echo "FAIL: export did not produce both artifacts"
+		failed=1
+	fi
+
+	# docs/09 step 9: the manifest must be there to validate against.
+	checks=$((checks + 1))
+	if ! grep -q '"manifest"' "${scratch}/exp/export.json"; then
+		echo "FAIL: the export carries no manifest"
+		failed=1
+	fi
+
+	# docs/08: an export renders no active content and fetches nothing. This is
+	# checked on real output because it is the artifact a user shares.
+	checks=$((checks + 1))
+	if grep -qi "<script" "${scratch}/exp/report.html"; then
+		echo "FAIL: the exported report contains a script tag"
+		failed=1
+	fi
+	checks=$((checks + 1))
+	if grep -qE 'src="https?:|href="https?:|@import' "${scratch}/exp/report.html"; then
+		echo "FAIL: the exported report references a remote resource"
+		failed=1
+	fi
+	checks=$((checks + 1))
+	if ! grep -q "default-src 'none'" "${scratch}/exp/report.html"; then
+		echo "FAIL: the exported report declares no restrictive CSP"
+		failed=1
+	fi
+
+	# docs/08: prompt text and command output stay out by default.
+	checks=$((checks + 1))
+	if grep -q "fix the build" "${scratch}/exp/export.json"; then
+		echo "FAIL: prompt text was exported without --include-messages"
+		failed=1
+	fi
+
 	# A usage error prints usage to stderr; a help request prints it to stdout.
 	expect_stderr "Usage:" "a usage error prints usage to stderr" -- "${NORN}" frobnicate
 
