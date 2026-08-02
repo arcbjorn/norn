@@ -2,7 +2,7 @@
 #
 # Prepare the native libraries the graphics stack needs.
 #
-# Two obligations, both documented in docs/13-spike-results.md:
+# Two obligations, both documented in docs/13-engineering-notes.md:
 #
 #   1. Odin vendors a compiled wgpu-native only for Windows, so macOS and Linux
 #      builds must supply their own. The Homebrew package is deliberately not

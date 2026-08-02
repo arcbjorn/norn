@@ -46,7 +46,7 @@ GPU API while leaving product UI under Norn's control.
 **Status:** Accepted. The phase-zero spike validated the pairing on macOS:
 Metal backend, high-DPI at 2.0x scale, and 0.31 ms per frame to build 100,000
 timeline instances against an 8 ms budget. See
-[Spike results](13-spike-results.md).
+[Engineering notes](13-engineering-notes.md).
 
 **Consequence:** wgpu-native is not vendored for macOS by Odin and the
 Homebrew package reports a version the bindings reject, so the project must

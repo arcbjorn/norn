@@ -14,7 +14,7 @@ import stbtt "vendor:stb/truetype"
 //
 // The phase-zero text spike measured this approach at 0.022 ms to lay out
 // 1,965 glyphs and 0.5-0.9 ms to build an atlas, against budgets of 8 ms and
-// 50 ms. See docs/13-spike-results.md.
+// 50 ms. See docs/13-engineering-notes.md.
 
 // ATLAS_SIZE is the backing texture for one cached rasterization.
 //

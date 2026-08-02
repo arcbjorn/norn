@@ -27,7 +27,7 @@ Read these documents in order when first joining the project.
 | [Development](10-development.md) | Repository layout, commands, style, and workflow |
 | [Roadmap](11-roadmap.md) | Milestones and definition of done |
 | [Decisions](12-decisions.md) | Accepted architectural decisions and open questions |
-| [Spike results](13-spike-results.md) | Phase-zero measurements and dependency findings |
+| [Engineering notes](13-engineering-notes.md) | Measurements, dependency findings, mistakes worth not repeating |
 
 ## Source of truth
 
