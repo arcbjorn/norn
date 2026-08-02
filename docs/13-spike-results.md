@@ -382,3 +382,56 @@ Also hit, for the third time in this project: Odin pads numeric format verbs
 with **zeros**, so `%-6d` printed a sample count of 2373 as "237300" and
 `%8.3f` printed 0.041 as "0000.041". Every aligned numeric column must be
 formatted to a string first.
+
+## Hostile fixture results
+
+docs/11 Phase 5 requires that "opening all hostile fixtures causes no execution,
+repository writes, crashes, or unbounded allocation." The fixtures live in
+`tests/fixtures/hostile` and run via `scripts/test-security.sh`, which is part
+of `scripts/norn.sh test`.
+
+Each fixture attacks one non-negotiable property from docs/08, and every check
+is outcome-based: not "was validation called" but "did the damage happen" — no
+sentinel file exists, the repository hash is unchanged, memory stayed bounded.
+118 checks, all passing.
+
+### One real crash, found on the first run
+
+`encoding.jsonl` aborted the process with SIGTRAP:
+
+```
+core/encoding/json/parser.odin(507:10) Invalid slice indices 31:28 out of range 0..<28
+```
+
+Odin's JSON string decoder sizes its output buffer from the input length. An
+invalid byte decodes to `RUNE_ERROR`, which re-encodes to **three** bytes, so a
+single stray `0xFF` inside a string writes past the end of the buffer. This is
+reachable from any hostile log — a denial of service, and a buffer overflow in a
+parser handling untrusted input.
+
+Fixed by validating UTF-8 at the trust boundary before the parser sees a record,
+which docs/08 required anyway. Kept as a unit test as well as a fixture, so an
+upstream repair cannot silently remove the protection.
+
+### Two false positives in the checks themselves
+
+Both worth recording, because both would have made the gate useless in opposite
+directions:
+
+- **Matching escaped content.** `grep "onload="` fires on `&lt;svg
+  onload=...&gt;`, which is inert text and exactly what correct escaping
+  produces. The check now looks for a real tag opening. A gate that fails when
+  the product is behaving correctly gets disabled.
+- **Matching the defence as the attack.** Including `meta` in the active-element
+  list flagged the report's own CSP declaration.
+
+### One check that could not fail
+
+The path-escape assertion searched `inspect --json` output for `/etc/passwd`.
+That command prints counts and metadata, never the path table, so a retained
+escaping path would never have appeared. Disabling path normalization confirmed
+it: the trace contained `/etc/passwd` and the gate still passed. It now searches
+the trace bytes, and fails as it should.
+
+This is the general lesson from the exercise: every security check was
+deliberately broken to confirm it fails. Three of them didn't at first.
