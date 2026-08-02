@@ -1,0 +1,11 @@
+{"type":"session","nsl_version":1}
+{"type":"message","t":1,"role":"user","text":"lone surrogate \ud800 here"}
+{"type":"message","t":2,"role":"user","text":"nul \u0000 embedded"}
+{"type":"file","t":3,"op":"create","path":"nul\u0000.odin","after":"x"}
+{"type":"message","t":4,"role":"user","text":"rtl \u202eoverride"}
+{"type":"message","t":5,"role":"user","text":"zero \u200bwidth"}
+{"type":"message","t":6,"role":"user","text":"raw invalid: ÿþÀ€í €"}
+{"type":"file","t":7,"op":"create","path":"ÿþ.odin","after":"x"}
+{"type":"message","t":8,"role":"user","text":"bom ï»¿ inside"}
+{"type":"message","t":9,"role":"user","text":"truncated utf8 â‚"}
+{"type":"message","t":10,"role":"user","text":"ok after damage"}

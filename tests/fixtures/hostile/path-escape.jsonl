@@ -1,0 +1,14 @@
+{"type":"session","nsl_version":1}
+{"type":"file","t":1,"op":"modify","path":"../../../etc/passwd","after":"pwned\n"}
+{"type":"file","t":2,"op":"modify","path":"/etc/passwd","after":"pwned\n"}
+{"type":"file","t":3,"op":"modify","path":"/tmp/norn-pwned-abs","after":"pwned\n"}
+{"type":"file","t":4,"op":"create","path":"C:\\Windows\\System32\\drivers\\etc\\hosts","after":"pwned\n"}
+{"type":"file","t":5,"op":"create","path":"\\\\server\\share\\file","after":"pwned\n"}
+{"type":"file","t":6,"op":"modify","path":"a/../../b","after":"pwned\n"}
+{"type":"file","t":7,"op":"modify","path":"./a.odin","after":"pwned\n"}
+{"type":"file","t":8,"op":"modify","path":"a//b.odin","after":"pwned\n"}
+{"type":"file","t":9,"op":"rename","path":"ok.odin","from":"../../outside.odin"}
+{"type":"file","t":10,"op":"rename","path":"../../escaped.odin","from":"ok.odin"}
+{"type":"file","t":11,"op":"modify","path":"~/secrets","after":"pwned\n"}
+{"type":"file","t":12,"op":"modify","path":"legit.odin","after":"this one is fine\n"}
+{"type":"diagnostic","t":13,"severity":"error","path":"../../../etc/shadow","line":1,"message":"escape"}

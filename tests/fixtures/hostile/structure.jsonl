@@ -1,0 +1,25 @@
+{"type":"session","nsl_version":1}
+{"type":"message","t":1,"role":"user","text":"valid before"}
+{"type":"message","t":2,
+{"type":
+{
+}
+[]
+null
+42
+"just a string"
+not json at all
+{"type":123,"t":1}
+{"type":null}
+{"t":1,"role":"user"}
+{"type":"message","t":"not a number","role":"user","text":"x"}
+{"type":"file","t":3,"op":123,"path":"a.odin"}
+{"type":"file","t":4,"op":"modify"}
+{"type":"file","t":5,"op":"rename","path":"a.odin"}
+{"type":"tool_result","t":6,"id":"never-opened","status":"ok"}
+{"type":"tool_call","t":7,"id":"dup","tool":"a"}
+{"type":"tool_call","t":8,"id":"dup","tool":"b"}
+{"type":"command","t":9,"exit":0}
+{"type":"test","t":10,"status":"pass"}
+{"type":"session","nsl_version":1}
+{"type":"message","t":11,"role":"user","text":"valid after"}

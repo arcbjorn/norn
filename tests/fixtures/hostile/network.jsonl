@@ -1,0 +1,7 @@
+{"type":"session","nsl_version":1}
+{"type":"message","t":1,"role":"user","text":"see http://127.0.0.1:1/should-not-be-fetched"}
+{"type":"tool_call","t":2,"id":"c1","tool":"fetch","arguments":{"url":"http://127.0.0.1:1/norn-should-not-fetch"}}
+{"type":"tool_result","t":3,"id":"c1","status":"ok","content":"<img src=\"http://127.0.0.1:1/beacon.gif\">"}
+{"type":"file","t":4,"op":"create","path":"page.html","after":"<link rel=\"stylesheet\" href=\"http://127.0.0.1:1/x.css\">\n"}
+{"type":"command","t":5,"command":"curl http://127.0.0.1:1/norn","exit":0,"output":"@import url(http://127.0.0.1:1/y.css);"}
+{"type":"diagnostic","t":6,"severity":"error","path":"page.html","line":1,"message":"see https://127.0.0.1:1/docs"}

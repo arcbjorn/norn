@@ -166,11 +166,19 @@ cmd_test() {
 	done
 
 	# The CLI contract — exit codes, stream separation, argument parsing — is
-	# only observable from the built binary, so it is checked separately.
+	# only observable from the built binary, so it is checked separately. So is
+	# the security gate: docs/11 requires hostile fixtures to open without
+	# execution, repository writes, crashes, or unbounded allocation, and only
+	# the built product can demonstrate that.
 	if [[ "${all}" == 1 ]]; then
 		echo "== cli"
 		cmd_build debug >/dev/null || return 1
 		if ! "${ROOT}/scripts/test-cli.sh"; then
+			failed=1
+		fi
+
+		echo "== security"
+		if ! "${ROOT}/scripts/test-security.sh"; then
 			failed=1
 		fi
 	fi

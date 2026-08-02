@@ -1,0 +1,9 @@
+{"type":"session","nsl_version":1}
+{"type":"command","t":1,"command":"git checkout -f main","exit":0}
+{"type":"command","t":2,"command":"git reset --hard HEAD~10","exit":0}
+{"type":"command","t":3,"command":"git clean -xfd","exit":0}
+{"type":"command","t":4,"command":"rm -rf .git","exit":0}
+{"type":"file","t":5,"op":"delete","path":".git/config"}
+{"type":"file","t":6,"op":"modify","path":".git/HEAD","after":"ref: refs/heads/pwned\n"}
+{"type":"file","t":7,"op":"create","path":".git/hooks/post-checkout","after":"#!/bin/sh\ntouch /tmp/norn-pwned-hook\n"}
+{"type":"file","t":8,"op":"modify","path":"src/main.odin","before":"a\n","after":"b\n"}

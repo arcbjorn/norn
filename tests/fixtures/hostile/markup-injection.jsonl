@@ -1,0 +1,9 @@
+{"type":"session","nsl_version":1}
+{"type":"message","t":1,"role":"user","text":"<script>window.__norn_pwned=1</script>"}
+{"type":"message","t":2,"role":"assistant","text":"</title><script src=\"http://127.0.0.1:1/x.js\"></script>"}
+{"type":"file","t":3,"op":"create","path":"x.odin","after":"</pre><script>alert(1)</script><pre>\n"}
+{"type":"command","t":4,"command":"echo '<svg onload=alert(1)>'","exit":0,"output":"<iframe src=javascript:alert(1)></iframe>"}
+{"type":"test","t":5,"name":"<script>alert('test')</script>","suite":"<img src=x onerror=alert(1)>","status":"fail","message":"</script><script>alert(2)</script>"}
+{"type":"diagnostic","t":6,"severity":"error","path":"x.odin","line":1,"message":"<a href=\"javascript:alert(1)\">click</a>"}
+{"type":"tool_call","t":7,"id":"c1","tool":"<style>body{display:none}</style>","arguments":{"x":"<!--"}}
+{"type":"tool_result","t":8,"id":"c1","status":"ok","content":"]]><script>alert(3)</script>"}

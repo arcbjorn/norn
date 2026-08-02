@@ -1,0 +1,6 @@
+{"type":"session","nsl_version":1}
+{"type":"message","t":1,"role":"user","text":"%s %d %n %p %x %%s %!(EXTRA"}
+{"type":"command","t":2,"command":"printf %s%s%s%s%n","exit":0,"output":"%p%p%p%p"}
+{"type":"file","t":3,"op":"create","path":"fmt.odin","after":"%v %T %w {{}} %!d(MISSING)\n"}
+{"type":"test","t":4,"name":"%n%n%n","suite":"%s","status":"fail","message":"%99999999d"}
+{"type":"diagnostic","t":5,"severity":"error","path":"fmt.odin","line":1,"message":"{{ %[1]v }}"}

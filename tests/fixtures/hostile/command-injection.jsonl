@@ -1,0 +1,13 @@
+{"type":"session","nsl_version":1,"generator":"; touch /tmp/norn-pwned-gen","session":"$(touch /tmp/norn-pwned-sess)"}
+{"type":"command","t":1,"command":"echo ok; touch /tmp/norn-pwned-cmd","exit":0,"output":"x"}
+{"type":"command","t":2,"command":"`touch /tmp/norn-pwned-backtick`","exit":0}
+{"type":"command","t":3,"command":"$(touch /tmp/norn-pwned-subst)","exit":0}
+{"type":"command","t":4,"command":"a && touch /tmp/norn-pwned-and","argv":["sh","-c","touch /tmp/norn-pwned-argv"],"exit":0}
+{"type":"command","t":5,"command":"a | tee /tmp/norn-pwned-pipe","exit":0}
+{"type":"command","t":6,"command":"a\ntouch /tmp/norn-pwned-newline","exit":0}
+{"type":"tool_call","t":7,"id":"c1","tool":"; touch /tmp/norn-pwned-tool","arguments":{"cmd":"touch /tmp/norn-pwned-args"}}
+{"type":"tool_result","t":8,"id":"c1","status":"error","error":"$(touch /tmp/norn-pwned-err)"}
+{"type":"file","t":9,"op":"modify","path":"a.odin","before":"x\n","after":"$(touch /tmp/norn-pwned-content)\n"}
+{"type":"message","t":10,"role":"user","text":"run: rm -rf / ; touch /tmp/norn-pwned-msg"}
+{"type":"test","t":11,"name":"; touch /tmp/norn-pwned-test","suite":"s","status":"fail","message":"`id`"}
+{"type":"diagnostic","t":12,"severity":"error","path":"a.odin","line":1,"message":"$(touch /tmp/norn-pwned-diag)"}
