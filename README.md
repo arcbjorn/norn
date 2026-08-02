@@ -34,7 +34,8 @@ and native UI are not built yet.
 | SDL3 + WGPU stack validation (decision 002) | Confirmed |
 | Text rendering and glyph atlas validation | Confirmed |
 | Timeline viewport, virtualization, hit testing | Implemented |
-| Native UI (window, panels, diff viewer) | Not started |
+| Draw lists, batching, timeline panel | Implemented |
+| Native UI (window, GPU backend, other panels) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
 baseline is the importer's job and the importer does not exist yet. A patch
@@ -113,7 +114,8 @@ src/
     codec/       .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison
   analysis/      outcomes, comparability, scoring, evidence, attempts
-  ui/            viewport transforms, virtualization, hit testing
+  render/        draw lists, primitives, batching
+  ui/            viewport transforms, virtualization, panels
   export/        bundle assembly, HTML report, canonical JSON
 tests/
   core/    arithmetic, path safety, checksum vectors
@@ -122,7 +124,8 @@ tests/
   replay/  patching, mutation chains, and seek properties
   analysis/ comparability, scoring weights, and evidence ordering
   export/  encoding, injection resistance, and determinism
-  ui/      transform inverses, virtualization, and hit testing
+  render/  draw list culling, clipping, and batch grouping
+  ui/      transform inverses, virtualization, and drawn output
 spike/    throwaway phase-zero validation programs
 scripts/  repeatable developer commands
 ```
@@ -166,5 +169,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-210 tests across seven packages. See [Quality](docs/09-quality.md) for the
+239 tests across eight packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
