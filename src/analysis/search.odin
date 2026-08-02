@@ -8,15 +8,12 @@ import "src:trace/model"
 
 // Search and filtering.
 //
-// docs/01 lists what search covers: event text and summaries, paths and symbol
-// names, command lines and diagnostic messages, tool names and structured
-// arguments, and event and span identifiers.
+// The searchable fields are the Field enum below; docs/01 fixes that list.
 //
-// It also states the rule that shapes the design: "a hidden filter must never
-// explain an apparently missing event." A user who cannot find an event they
-// know exists must be able to see why. Every result therefore carries which
-// field matched, and the query reports how many events each active filter
-// removed — so "no results" is always accompanied by the reason.
+// One rule shapes the design: "a hidden filter must never explain an apparently
+// missing event." Every result therefore carries which field matched, and every
+// query reports what each filter removed — so "no results" always comes with
+// its reason.
 
 // Field identifies where a match was found.
 //

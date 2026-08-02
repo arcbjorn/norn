@@ -7,16 +7,13 @@ import "src:core"
 
 // Repository identity capture.
 //
-// docs/05-importers.md lists what the importer records about a repository, and
-// permits reading baseline content with `git show` using a fixed argument
-// vector.
+// docs/05 permits reading baseline content with `git show` under a fixed
+// argument vector. This is the only place Norn runs another program, and
+// docs/08 bounds it: no command from a trace is ever executed, and no path
+// resolves outside the selected repository.
 //
-// docs/08 fixes the boundary this file must not cross: opening or replaying a
-// trace must never "execute a command, script, binary, hook, plugin, or macro"
-// and must never "resolve a path outside the selected repository boundary".
-// Import is the one place Norn runs anything at all, and it runs exactly one
-// program with arguments it constructs itself. Nothing from the trace ever
-// becomes an argument.
+// Nothing from the trace becomes an argument. Every value is validated here,
+// at the boundary, before it reaches a vector.
 
 // GIT_PROGRAM is the only executable this project ever runs.
 //

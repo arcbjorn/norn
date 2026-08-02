@@ -7,16 +7,15 @@ import "core:strings"
 
 // The NSL fixture generator.
 //
-// docs/09 defines four fixture tiers and requires that large fixtures be
-// "generated deterministically when possible". Deterministic means a tier name
-// alone reproduces the file byte for byte: no clock, no system entropy, no
-// filesystem order. Only then can a golden test compare against a stored hash,
-// and only then does a performance regression mean the code changed rather than
-// the input.
+// docs/09 requires large fixtures to be generated deterministically: a tier
+// name alone must reproduce the file byte for byte, with no clock, no system
+// entropy, and no filesystem order. Only then can a golden test compare against
+// a stored hash, and only then does a performance regression mean the code
+// changed rather than the input.
 //
-// The generated content is invented. Per docs/05, fixtures must not contain
-// real credentials, prompts, usernames, home paths, or source from other
-// projects, so every string here is drawn from fixed vocabularies below.
+// Content is invented. Per docs/05 a fixture carries no real credentials,
+// prompts, usernames, home paths, or source from other projects, so every
+// string is drawn from the fixed vocabularies below.
 
 VERSION :: "1"
 

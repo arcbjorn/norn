@@ -7,19 +7,14 @@ import "src:trace/model"
 
 // Baseline capture.
 //
-// docs/06: "the strongest baseline is content read from a recorded starting
-// commit and verified against recorded hashes. A working-tree snapshot is
-// acceptable but is labeled observational."
+// docs/06: content read from a recorded commit and verified against recorded
+// hashes is the strongest baseline; a working-tree snapshot is acceptable but
+// labelled observational. Without either, an edit to a pre-existing file is a
+// `missing_baseline` gap — honest, but also the common case.
 //
-// Without a baseline, replay starts from nothing and a patch against a file the
-// session only modified — never created — is a `missing_baseline` gap. That is
-// the honest result, but it is also the common case: an agent editing an
-// existing repository mostly modifies files that already existed.
-//
-// The manifest records only what was actually read. docs/06 is explicit that it
-// "must not imply that unobserved paths were absent", which is why absence is
-// an explicit entry rather than the default: a path missing from the manifest
-// means nothing was observed, not that the file was not there.
+// The manifest records only what was observed. docs/06 forbids implying that
+// unobserved paths were absent, so absence is an explicit entry: a path missing
+// from the manifest means nothing was looked at, not that nothing was there.
 
 // MAX_BASELINE_FILES bounds how many files one import reads.
 //

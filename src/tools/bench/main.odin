@@ -13,18 +13,15 @@ import "src:trace/codec"
 
 // Replay seek benchmark.
 //
-// docs/00: "reconstruct any indexed text file within 100 ms at the p95."
-// docs/11 makes reference-fixture seek a Phase 2 exit criterion, and docs/09
-// lists "replay seek latency by mutation distance" among the benchmarks.
+// docs/00 budgets reconstructing any indexed text file at 100 ms p95, and
+// docs/11 makes reference-fixture seek a Phase 2 exit criterion.
 //
 // Measured through app.replay_session_init and replay.seek — the same path the
 // viewer takes. A benchmark that assembled the engine itself could easily be
 // faster than the product and would prove nothing about it.
 //
-// docs/09: "results include machine and compiler details. A single local number
-// is not a portable promise." This prints the sample count and distribution
-// rather than one number, because a p95 is the claim and a mean would hide the
-// tail the budget is about.
+// Reports a distribution rather than one number: the claim is a p95, and a mean
+// would hide the tail the budget is about.
 
 // BUDGET_NS is the reconstruction budget from docs/00.
 BUDGET_NS :: 100 * 1_000_000
