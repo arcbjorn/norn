@@ -6,6 +6,7 @@ import "core:strings"
 
 import "src:core"
 import api "src:importers/api"
+import "src:importers/nsl"
 
 // `norn import`.
 //
@@ -199,9 +200,22 @@ select_importer :: proc(
 		if len(results) == 0 {
 			fmt.eprintfln("norn: no importer recognizes %q", source_path)
 		} else {
+			// Two different situations, and conflating them misleads. Several
+			// confident adapters is a genuine ambiguity the user resolves. One
+			// unsure adapter is not ambiguous at all — nothing recognized the
+			// file well enough to claim it, and saying "ambiguous" would send
+			// the user looking for a competing adapter that does not exist.
+			if len(results) == 1 {
+				fmt.eprintfln(
+					"norn: no importer recognizes %q with enough confidence",
+					source_path,
+				)
+			} else {
+				fmt.eprintfln("norn: %q is ambiguous; choose with --format", source_path)
+			}
+
 			// Report what was considered, so --format is an informed choice
 			// rather than a guess of the identifier's spelling.
-			fmt.eprintfln("norn: %q is ambiguous; choose with --format", source_path)
 			for result in results {
 				detection := result.detection
 				fmt.eprintfln(
@@ -302,9 +316,11 @@ home_directory :: proc() -> string {
 
 // register_importers installs the adapters this build carries.
 //
-// docs/05 locks the first adapter's schema with fixtures, so an adapter appears
-// here only once its fixtures exist. An empty registry produces an honest
-// "no importers" failure rather than a wrong guess.
+// docs/05 locks an adapter's schema with fixtures, so an adapter appears here
+// only once its fixtures exist. A provider adapter is added when real sample
+// traces are available to pin its schema; until then NSL, whose schema Norn
+// owns and whose fixtures are generated, is the one importable format.
 @(private)
 register_importers :: proc(registry: ^api.Registry) {
+	api.register(registry, nsl.importer())
 }

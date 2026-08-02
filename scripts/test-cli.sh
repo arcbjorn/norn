@@ -93,12 +93,25 @@ main() {
 	expect_code 3 "a source that does not exist" -- \
 		"${NORN}" import "${scratch}/absent.jsonl" --repo "${ROOT}"
 
-	# docs/05: a build with no adapters cannot import, and says so rather than
-	# reporting an unrecognized format.
-	expect_code 5 "import with no adapters registered" -- \
+	# docs/05: a file is not a given format merely because it is JSONL, so a log
+	# with no NSL header is refused rather than imported by guess.
+	expect_code 5 "a source no adapter recognizes" -- \
 		"${NORN}" import "${source}" --repo "${ROOT}"
-	expect_stderr "no importers" "the missing-adapter message names the cause" -- \
+	expect_stderr "no importer recognizes" "an unrecognized source names the cause" -- \
 		"${NORN}" import "${source}" --repo "${ROOT}"
+	# One unsure adapter is not an ambiguity, and must not be reported as one.
+	checks=$((checks + 1))
+	weak_output="$("${NORN}" import "${source}" --repo "${ROOT}" 2>&1)"
+	if [[ "${weak_output}" == *"is ambiguous"* ]]; then
+		echo "FAIL: a single weak claim was reported as ambiguous"
+		failed=1
+	fi
+
+	# An unknown --format lists what is available rather than failing blankly.
+	expect_code 2 "an unknown format" -- \
+		"${NORN}" import "${source}" --repo "${ROOT}" --format nope
+	expect_stderr "available formats" "an unknown format lists the real ones" -- \
+		"${NORN}" import "${source}" --repo "${ROOT}" --format nope
 
 	# Every failure keeps stdout clean.
 	expect_stdout_empty "a usage error writes nothing to stdout" -- "${NORN}" import
@@ -123,18 +136,78 @@ main() {
 		failed=1
 	fi
 
+	# A real import, end to end. docs/11: the trace must be inspectable without
+	# the source it came from.
+	local nsl="${scratch}/session.nsl.jsonl"
+	{
+		echo '{"type":"session","nsl_version":1,"started_at":1000}'
+		echo '{"type":"message","t":1100,"role":"user","text":"fix the test"}'
+		echo '{"type":"file","t":1200,"op":"modify","path":"a.odin","before":"x\n","after":"y\n"}'
+		echo '{"type":"command","t":1300,"command":"odin test","exit":0,"output":"ok"}'
+	} >"${nsl}"
+
+	expect_code 0 "importing an NSL log" -- \
+		"${NORN}" import "${nsl}" --repo "${ROOT}" --out "${scratch}/good.norn"
+
+	checks=$((checks + 1))
+	if [[ ! -e "${scratch}/good.norn" ]]; then
+		echo "FAIL: a successful import wrote no destination"
+		failed=1
+	fi
+
+	# The source is removed before reading the trace back, so nothing can be
+	# quietly resolved from it.
+	rm -f "${nsl}"
+	expect_code 0 "validating the imported trace" -- \
+		"${NORN}" validate "${scratch}/good.norn" --mode full
+	expect_code 0 "replaying the imported trace" -- \
+		"${NORN}" validate "${scratch}/good.norn" --mode replay
+	expect_code 0 "inspecting the imported trace" -- \
+		"${NORN}" inspect "${scratch}/good.norn"
+
+	# The mutation must reconstruct, not merely be present.
+	checks=$((checks + 1))
+	replay_output="$("${NORN}" validate "${scratch}/good.norn" --mode replay 2>/dev/null)"
+	if [[ "${replay_output}" != *"verified:   1"* ]]; then
+		echo "FAIL: the imported mutation did not replay"
+		failed=1
+	fi
+
+	# --dry-run reports what a source contains without writing output.
+	local dry="${scratch}/dry.jsonl"
+	{
+		echo '{"type":"session","nsl_version":1}'
+		echo '{"type":"message","t":1,"role":"user","text":"hello"}'
+		echo '{"type":"checkpoint","t":2}'
+	} >"${dry}"
+
+	expect_code 0 "a dry run" -- "${NORN}" import "${dry}" --dry-run
+	checks=$((checks + 1))
+	if [[ -e "${scratch}/dry.norn" ]]; then
+		echo "FAIL: a dry run wrote a destination"
+		failed=1
+	fi
+	# docs/01: unsupported record types are reported before output is written.
+	checks=$((checks + 1))
+	dry_output="$("${NORN}" import "${dry}" --dry-run 2>/dev/null)"
+	if [[ "${dry_output}" != *"checkpoint"* ]]; then
+		echo "FAIL: a dry run did not name the unsupported record type"
+		failed=1
+	fi
+
 	# Successful commands.
 	expect_code 0 "version" -- "${NORN}" version
 	expect_code 0 "help" -- "${NORN}" help
 
 	# Usage lists import as available, not as unimplemented.
 	checks=$((checks + 1))
-	if ! "${NORN}" help | grep -q "norn import"; then
+	help_output="$("${NORN}" help)"
+	if [[ "${help_output}" != *"norn import"* ]]; then
 		echo "FAIL: usage does not list the import command"
 		failed=1
 	fi
 	checks=$((checks + 1))
-	if "${NORN}" help | grep -q "not yet implemented"; then
+	if [[ "${help_output}" == *"not yet implemented"* ]]; then
 		echo "FAIL: usage still lists import as unimplemented"
 		failed=1
 	fi
