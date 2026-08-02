@@ -33,7 +33,8 @@ and native UI are not built yet.
 | Annotation overlays and bookmarks | Not started |
 | SDL3 + WGPU stack validation (decision 002) | Confirmed |
 | Text rendering and glyph atlas validation | Confirmed |
-| Native UI (timeline, panels, diff viewer) | Not started |
+| Timeline viewport, virtualization, hit testing | Implemented |
+| Native UI (window, panels, diff viewer) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
 baseline is the importer's job and the importer does not exist yet. A patch
@@ -112,6 +113,7 @@ src/
     codec/       .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison
   analysis/      outcomes, comparability, scoring, evidence, attempts
+  ui/            viewport transforms, virtualization, hit testing
   export/        bundle assembly, HTML report, canonical JSON
 tests/
   core/    arithmetic, path safety, checksum vectors
@@ -120,6 +122,7 @@ tests/
   replay/  patching, mutation chains, and seek properties
   analysis/ comparability, scoring weights, and evidence ordering
   export/  encoding, injection resistance, and determinism
+  ui/      transform inverses, virtualization, and hit testing
 spike/    throwaway phase-zero validation programs
 scripts/  repeatable developer commands
 ```
@@ -147,6 +150,11 @@ Exports are self-contained: the HTML report declares a restrictive content
 security policy, contains no script element, and references no remote resource,
 so a trace containing markup renders as text rather than executing.
 
+The timeline enforces one more: hit testing and drawing share a single
+transform. docs/07 prohibits duplicate coordinate math because two formulas
+drift, so clicking always selects what was drawn — asserted by a property test
+over a thousand random timestamps.
+
 Replay adds its own rule: patch application is strict. A hunk whose context
 does not match exactly produces a labeled gap, never relocated or fuzzy-matched
 content. Reconstructing a file at the wrong offset would produce bytes the
@@ -158,5 +166,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-173 tests across six packages. See [Quality](docs/09-quality.md) for the
+210 tests across seven packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
