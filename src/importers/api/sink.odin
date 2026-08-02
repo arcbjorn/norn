@@ -183,6 +183,35 @@ add_blob_text :: proc(
 	return id
 }
 
+// content_digest returns the digest of `content` as it would be stored.
+//
+// docs/08 puts redaction before the writer, so a stored blob's digest is of the
+// redacted bytes. A mutation hash must describe the same bytes replay will
+// verify, which means an adapter cannot hash the source text it was handed —
+// for redacted content the two differ, and replay would report a mismatch on
+// content that reconstructed correctly.
+//
+// Provided here rather than left to each adapter, because an adapter that
+// hashed the wrong bytes would produce a trace that looks verifiable and is
+// not.
+content_digest :: proc(sink: ^Sink, content: string) -> model.Blob_Digest {
+	if content == "" {
+		return {}
+	}
+	if sink.redactor == nil {
+		return model.digest_content(transmute([]byte)content)
+	}
+
+	// Redacting for the digest must not double-count: the counters belong to
+	// the pass that actually stored the content.
+	saved := sink.redactor.counts
+	redacted := redact(sink.redactor, content, context.temp_allocator)
+	defer delete(redacted, context.temp_allocator)
+	sink.redactor.counts = saved
+
+	return model.digest_content(transmute([]byte)redacted)
+}
+
 // add_entity registers a subject, deduplicating by kind and name.
 //
 // Deduplication matters: a session that reads one file forty times must
