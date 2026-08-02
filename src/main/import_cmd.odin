@@ -132,6 +132,10 @@ command_import :: proc(arguments: []string) -> int {
 		retain_raw_records = retain_raw,
 		repository_root    = repository.root,
 		home_prefix        = home_directory(),
+		// Baseline capture reads starting content for the paths the session
+		// touched, so a modify against a pre-existing file replays instead of
+		// reporting a gap.
+		repository = &repository,
 	}
 
 	outcome, import_err := api.import_source(
@@ -154,6 +158,19 @@ command_import :: proc(arguments: []string) -> int {
 	fmt.printfln("wrote %s", outcome.destination)
 	fmt.println()
 	fmt.print(report)
+
+	// docs/06 separates observed-absent from not-observed, so the report says
+	// which. A user comparing two imports needs to know whether a gap came from
+	// a file that was not there or one that could not be read.
+	if outcome.baseline_captured > 0 || outcome.baseline_absent > 0 ||
+	   outcome.baseline_skipped > 0 {
+		fmt.printfln(
+			"\nbaseline: %d captured, %d absent, %d skipped",
+			outcome.baseline_captured,
+			outcome.baseline_absent,
+			outcome.baseline_skipped,
+		)
+	}
 	return EXIT_OK
 }
 

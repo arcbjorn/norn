@@ -324,6 +324,82 @@ main() {
 		failed=1
 	fi
 
+	# Baseline capture: a patch against a file that existed before the session
+	# must reconstruct, not report a missing-baseline gap. This is the case that
+	# motivated capture, and it needs a real repository to be meaningful.
+	local brepo="${scratch}/brepo"
+	mkdir -p "${brepo}/src"
+	printf 'package main\n\nmain :: proc() {\n}\n' >"${brepo}/src/main.odin"
+	(
+		cd "${brepo}" || exit 1
+		git init -q .
+		git add -A
+		git -c user.email=t@t -c user.name=t commit -qm initial
+	) >/dev/null 2>&1
+
+	# Written with python3 rather than printf: the record embeds a unified patch
+	# whose newlines must survive as JSON \n escapes, and shell quoting mangles
+	# them. A malformed record would be ignored and the test would pass by
+	# importing nothing.
+	python3 - "${scratch}/baseline.jsonl" <<'PYEOF'
+import json, sys
+before = "package main\n\nmain :: proc() {\n}\n"
+patch = (
+    "--- a/src/main.odin\n"
+    "+++ b/src/main.odin\n"
+    "@@ -1,4 +1,5 @@\n"
+    " package main\n"
+    " \n"
+    " main :: proc() {\n"
+    "+\tfoo()\n"
+    " }\n"
+)
+lines = [
+    {"type": "session", "nsl_version": 1, "started_at": 1000},
+    # A patch with no "after" content: replay can only produce the result by
+    # applying it to the captured baseline.
+    {"type": "file", "t": 1200, "op": "modify", "path": "src/main.odin",
+     "before": before, "patch": patch},
+]
+with open(sys.argv[1], "w") as handle:
+    for line in lines:
+        handle.write(json.dumps(line) + "\n")
+PYEOF
+
+	baseline_report="$("${NORN}" import "${scratch}/baseline.jsonl" --repo "${brepo}" \
+		--out "${scratch}/baseline.norn" 2>/dev/null)"
+
+	checks=$((checks + 1))
+	if [[ "${baseline_report}" != *"baseline: 1 captured"* ]]; then
+		echo "FAIL: baseline capture did not read the existing file"
+		echo "      got: ${baseline_report}"
+		failed=1
+	fi
+
+	# docs/06: content from a clean commit is verified, not observational.
+	checks=$((checks + 1))
+	baseline_inspect="$("${NORN}" inspect "${scratch}/baseline.norn" 2>/dev/null)"
+	if [[ "${baseline_inspect}" != *"commit_verified"* ]]; then
+		echo "FAIL: a clean commit did not produce a verified baseline"
+		failed=1
+	fi
+
+	# The property that matters: no gap.
+	checks=$((checks + 1))
+	baseline_replay="$("${NORN}" validate "${scratch}/baseline.norn" --mode replay 2>/dev/null)"
+	if [[ "${baseline_replay}" == *"gaps:"* ]]; then
+		echo "FAIL: a patch against a captured baseline still reported a gap"
+		echo "      got: ${baseline_replay}"
+		failed=1
+	fi
+
+	# Repository reads must not disturb the repository.
+	checks=$((checks + 1))
+	if [[ -n "$(cd "${brepo}" && git status --porcelain)" ]]; then
+		echo "FAIL: baseline capture modified the repository"
+		failed=1
+	fi
+
 	# A usage error prints usage to stderr; a help request prints it to stdout.
 	expect_stderr "Usage:" "a usage error prints usage to stderr" -- "${NORN}" frobnicate
 
