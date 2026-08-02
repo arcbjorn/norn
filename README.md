@@ -10,8 +10,9 @@ The full specification lives in [`docs/`](docs/README.md). Start with
 ## Status
 
 Early implementation. The canonical trace model, the `.norn` container codec,
-the replay engine, evidence analysis, and the `inspect`, `validate`, and
-`explain` CLI commands work. The importer and native UI are not built yet.
+the replay engine, evidence analysis, and redacted export all work, along with
+the `inspect`, `validate`, `explain`, and `export` CLI commands. The importer
+and native UI are not built yet.
 
 | Area | State |
 | --- | --- |
@@ -26,9 +27,10 @@ the replay engine, evidence analysis, and the `inspect`, `validate`, and
 | Comparable outcomes and candidate windows | Implemented |
 | Versioned contributor scoring and evidence stacks | Implemented |
 | Attempt and retry-loop detection | Implemented |
-| `norn inspect` / `validate` / `explain` | Implemented |
+| Redacted HTML and canonical JSON export | Implemented |
+| `norn inspect` / `validate` / `explain` / `export` | Implemented |
 | Codex importer | Not started |
-| Export and diagnostic bundles | Not started |
+| Annotation overlays and bookmarks | Not started |
 | Native UI (SDL3 + WGPU) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
@@ -66,12 +68,18 @@ norn inspect <trace.norn> [--json]
 norn validate <trace.norn> [--mode quick|full|replay]
 norn explain <trace.norn> --list
 norn explain <trace.norn> --event <id>
+norn export  <trace.norn> --out <dir> [--range start:end] [--event <id>]
 ```
 
 `explain` is the diagnosis workflow: select a failed outcome and it reports the
 evidence behind it, separated into explicit, reconstructed, and inferred
 levels, with every candidate score expanding into the deterministic rules that
 produced it. Candidates are labeled candidates, never causes.
+
+`export` writes that same evidence as a self-contained HTML report plus
+canonical JSON. It prints an inclusion manifest before writing, excludes prompt
+text and raw provider records by default, and creates files readable only by
+their owner.
 
 Machine-readable output goes to stdout and diagnostics to stderr, so
 `norn inspect --json` can be piped without filtering. Exit codes: `0` success,
@@ -89,12 +97,14 @@ src/
     codec/       .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison
   analysis/      outcomes, comparability, scoring, evidence, attempts
+  export/        bundle assembly, HTML report, canonical JSON
 tests/
   core/    arithmetic, path safety, checksum vectors
   model/   interning and blob identity
   codec/   roundtrip, determinism, and corruption fixtures
   replay/  patching, mutation chains, and seek properties
   analysis/ comparability, scoring weights, and evidence ordering
+  export/  encoding, injection resistance, and determinism
 scripts/  repeatable developer commands
 ```
 
@@ -117,6 +127,10 @@ The corruption suite asserts rejection for truncation at every byte boundary,
 invalid magic and versions, size overflow, checksum mismatch, declared
 decompression bombs, and content tampering that repaired its local checksum.
 
+Exports are self-contained: the HTML report declares a restrictive content
+security policy, contains no script element, and references no remote resource,
+so a trace containing markup renders as text rather than executing.
+
 Replay adds its own rule: patch application is strict. A hunk whose context
 does not match exactly produces a labeled gap, never relocated or fuzzy-matched
 content. Reconstructing a file at the wrong offset would produce bytes the
@@ -128,5 +142,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-146 tests across five packages. See [Quality](docs/09-quality.md) for the
+173 tests across six packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.

@@ -39,6 +39,8 @@ main :: proc() {
 		os.exit(command_validate(rest))
 	case "explain":
 		os.exit(command_explain(rest))
+	case "export":
+		os.exit(command_export(rest))
 	case "version", "--version", "-v":
 		fmt.println(VERSION)
 		os.exit(EXIT_OK)
@@ -60,12 +62,16 @@ Usage:
   norn validate <trace.norn> [--mode quick|full|replay]
   norn explain <trace.norn> --event <id>
   norn explain <trace.norn> --list
+  norn export <trace.norn> --out <dir> [--range start:end] [--event <id>]
   norn version
+
+Export includes file paths, diffs, command lines, and evidence by default.
+Prompt text and command output are excluded unless --include-messages or
+--include-output is given.
 
 Commands not yet implemented in this build:
   norn open <trace.norn>
   norn import <source> --repo <path> [--format codex] [--out file.norn]
-  norn export <trace.norn> --range <start:end> --out <directory>
 
 Exit codes:
   0  success
