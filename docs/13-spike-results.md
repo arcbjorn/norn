@@ -486,3 +486,38 @@ eight captured files of about 400 lines each:
 Still two orders of magnitude inside the 100 ms budget. Snapshot restores avoid
 most resets, so the hashing happens far less often than the seek pattern
 suggests.
+
+## Search latency
+
+docs/09 lists search latency among the benchmarks, and docs/01 requires search
+over event text, paths, command lines, diagnostics, tool arguments, and
+identifiers. Measured on the reference fixture (69,354 events), release build.
+
+| Query | Hits | p50 | p95 |
+| --- | ---: | ---: | ---: |
+| `engine` | 500 | 7.36 ms | 7.69 ms |
+| `odin test` | 500 | 6.20 ms | 6.36 ms |
+| `undefined` | 500 | 6.24 ms | 6.32 ms |
+| `zzz-no-match` | 0 | 5.53 ms | 5.67 ms |
+| `reader.odin` | 500 | 5.88 ms | 6.01 ms |
+| `42` | 500 | 8.57 ms | 8.63 ms |
+
+Linear scan, no index. An index would have to be built on open, kept current,
+and stored in the container; a scan comparing interned strings is already fast
+enough to run on every keystroke.
+
+### The first version was eighteen times slower
+
+It measured **110 ms per query**, which is not a search box — it is a search
+button. The tell was that `zzz-no-match` cost the same as a query matching
+everything: if matching were the expense, finding nothing would be cheap.
+
+The cost was `strings.to_lower` allocating a lowercase copy of every field of
+every event, purely to compare case-insensitively. Folding bytes in place during
+the comparison removed the allocation entirely and took it to 6 ms. The needle
+is lowered once per query rather than once per field.
+
+Case folding is ASCII-only. A full Unicode fold needs a table and per-rune
+decoding, and the fields being searched are paths, identifiers, and command
+lines; non-ASCII text still matches exactly, it is simply not case-insensitive
+beyond ASCII.
