@@ -35,7 +35,8 @@ and native UI are not built yet.
 | Text rendering and glyph atlas validation | Confirmed |
 | Timeline viewport, virtualization, hit testing | Implemented |
 | Draw lists, batching, timeline panel | Implemented |
-| Native UI (window, GPU backend, other panels) | Not started |
+| WGPU backend (pipelines, instance ring, scissor) | Implemented |
+| Native UI (window, application loop, other panels) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
 baseline is the importer's job and the importer does not exist yet. A patch
@@ -75,6 +76,7 @@ scripts/norn.sh test [package]
 scripts/norn.sh check
 scripts/norn.sh spike graphics [--frames N] [--events N]
 scripts/norn.sh spike text [--frames N]
+scripts/norn.sh spike backend [--frames N]
 scripts/norn.sh clean
 ```
 
@@ -114,7 +116,7 @@ src/
     codec/       .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison
   analysis/      outcomes, comparability, scoring, evidence, attempts
-  render/        draw lists, primitives, batching
+  render/        draw lists, primitives, batching, WGPU backend
   ui/            viewport transforms, virtualization, panels
   export/        bundle assembly, HTML report, canonical JSON
 tests/
@@ -124,7 +126,7 @@ tests/
   replay/  patching, mutation chains, and seek properties
   analysis/ comparability, scoring weights, and evidence ordering
   export/  encoding, injection resistance, and determinism
-  render/  draw list culling, clipping, and batch grouping
+  render/  draw list culling, clipping, batching, instance layout
   ui/      transform inverses, virtualization, and drawn output
 spike/    throwaway phase-zero validation programs
 scripts/  repeatable developer commands
@@ -169,5 +171,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-239 tests across eight packages. See [Quality](docs/09-quality.md) for the
+247 tests across eight packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.

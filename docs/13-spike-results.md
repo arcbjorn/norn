@@ -138,6 +138,32 @@ therefore also dumps rasterized coverage as text, which shows correct shapes
 with antialiased edges, a proper descender on `g`, and uniform advance across
 the monospace face (13.65 px at 26 device pixels). Ascent 21.34, descent -4.66.
 
+## Renderer backend
+
+**Verdict: the batched renderer works end to end on Metal.**
+
+`scripts/norn.sh spike backend` builds a timeline frame from a 20,000-event
+trace, sweeps the viewport, and submits through `src/render`. Both pipelines
+compile on the real device.
+
+| Measurement | Value |
+| --- | ---: |
+| Commands per frame | 7,018 |
+| Draw calls | 4 |
+| Peak resident set, 600 frames | 140 MiB |
+
+7,018 commands collapsing to 4 draw calls is the batching working: the frame
+changes pipeline or clip only four times.
+
+The instance ring grew from 12,288 to 42,106 instances and then stopped, which
+is the intended amortization — it doubles on demand rather than reallocating
+per frame, and settles once it fits the workload.
+
+Frame wall time tracks the 120 Hz refresh under `Fifo`, as with the other
+spikes. The CPU-side cost of query, layout, draw-list construction and batching
+was measured separately at 0.014 ms for a typical zoom and 2.4 ms with all
+100,000 reference events visible.
+
 ## Dependency findings
 
 ### wgpu-native is not vendored for macOS
