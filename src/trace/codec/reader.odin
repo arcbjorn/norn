@@ -81,6 +81,26 @@ trace_blob_content :: proc(
 	if !found {
 		return nil, core.err_make(.Invalid_Reference, "trace names a blob that does not exist")
 	}
+
+	// A trace being built in memory keeps its content in the blob table; one
+	// read from disk keeps it in a mapped chunk. Both are legitimate — an
+	// importer produces the first and a viewer opens the second — so the
+	// resident case is served here rather than forcing every caller to know
+	// which kind of trace it holds.
+	if trace.blobs.content_resident {
+		content, ok := model.blob_content(&trace.blobs, id)
+		if !ok {
+			return nil, core.err_make(.Not_Found, "blob content is not present")
+		}
+		if !model.digest_equal(model.digest_content(content), entry.digest) {
+			return nil, core.err_make(
+				.Checksum_Mismatch,
+				"blob content does not match its recorded digest",
+			)
+		}
+		return content, nil
+	}
+
 	if trace.blob_content == nil {
 		return nil, core.err_make(.Not_Found, "trace stores no blob content")
 	}
