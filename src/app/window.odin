@@ -56,6 +56,14 @@ Window :: struct {
 	width, height: f32,
 	scale:         f32,
 
+	// Height reserved at the top for the search bar, zero when it is closed.
+	// Every panel's origin is offset by it, so opening search moves the
+	// workspace down rather than drawing over it.
+	top_offset: f32,
+	// Where the filter chips were drawn, so a click resolves against the same
+	// rectangles. docs/07 prohibits a second copy of the geometry.
+	chips: ui.Chip_Layout,
+
 	// The revision last drawn, so an unchanged frame is not redrawn.
 	drawn_revision: u64,
 	// Forces a redraw regardless of revision, after a resize or a device
@@ -230,7 +238,20 @@ timeline_bounds :: proc(window: ^Window) -> render.Rect {
 	if diff_visible(window) {
 		bottom = diff_bounds(window).y0 - margin
 	}
-	return render.Rect{x0 = left, y0 = margin, x1 = right, y1 = bottom}
+	return render.Rect{x0 = left, y0 = window.top_offset + margin, x1 = right, y1 = bottom}
+}
+
+// search_bounds returns the top bar's rectangle.
+//
+// docs/01 places Search and Filters in the top bar, spanning the full width
+// above every other panel.
+search_bounds :: proc(window: ^Window) -> render.Rect {
+	return render.Rect {
+		x0 = 0,
+		y0 = 0,
+		x1 = window.width,
+		y1 = ui.SEARCH_BAR_HEIGHT * window.scale,
+	}
 }
 
 // map_bounds returns the rectangle the repository map occupies.
@@ -243,7 +264,12 @@ map_bounds :: proc(window: ^Window) -> render.Rect {
 	if diff_visible(window) {
 		bottom = diff_bounds(window).y0
 	}
-	return render.Rect{x0 = 0, y0 = 0, x1 = MAP_WIDTH * window.scale, y1 = bottom}
+	return render.Rect {
+		x0 = 0,
+		y0 = window.top_offset,
+		x1 = MAP_WIDTH * window.scale,
+		y1 = bottom,
+	}
 }
 
 // map_visible reports whether the window is wide enough for the map.
@@ -286,7 +312,7 @@ inspector_bounds :: proc(window: ^Window) -> render.Rect {
 	width := INSPECTOR_WIDTH * window.scale
 	return render.Rect {
 		x0 = window.width - width,
-		y0 = 0,
+		y0 = window.top_offset,
 		x1 = window.width,
 		y1 = window.height,
 	}
@@ -432,6 +458,14 @@ select_at_pointer :: proc(
 ) {
 	x := logical_x * window.scale
 	y := logical_y * window.scale
+
+	// The search bar is drawn above everything, so it claims clicks first.
+	// Removing a chip must work wherever it was drawn, including over the area
+	// a panel would otherwise own.
+	if state.search_open && render.rect_contains(search_bounds(window), x, y) {
+		toggle_chip_at(window, state, trace, x, y)
+		return
+	}
 
 	// The map claims clicks in its own area. Focusing a file there is what
 	// gives the diff panel its subject.
@@ -645,6 +679,11 @@ draw_frame :: proc(
 	if state.selection.has_playhead {
 		seek_to(session, trace, state.selection.playhead_ns)
 	}
+	// The search bar reserves its band before any bounds are computed, so every
+	// panel below it is positioned once rather than drawn and then moved.
+	window.top_offset = ui.SEARCH_BAR_HEIGHT * window.scale if state.search_open else 0
+	apply_layout(window, state, timeline_bounds(window))
+
 	// 4. Visible-data query.
 	set := ui.query_visible(trace, index, state.viewport, state.lanes)
 	defer ui.visible_set_destroy(&set)
@@ -713,6 +752,35 @@ draw_frame :: proc(
 			trace,
 			outcomes,
 		)
+	}
+
+	if state.search_open {
+		window.chips = ui.draw_search(
+			&window.list,
+			ui.Search_State {
+				bounds = search_bounds(window),
+				theme = ui.DARK_SEARCH,
+				fonts = &window.fonts if window.fonts_loaded else nil,
+				atlas = atlas,
+				scale = window.scale,
+				text = string(state.search_text[:]),
+				kinds = state.search_query.kinds,
+				failed_only = state.search_query.failed_only,
+				scoped_path = state.search_query.path,
+				has_range = state.search_query.start_ns != 0 ||
+					state.search_query.end_ns != 0,
+				match_count = len(state.search_results.matches),
+				selected = state.search_selected,
+				examined = state.search_results.examined,
+				excluded_by_kind = state.search_results.excluded_by_kind,
+				excluded_by_time = state.search_results.excluded_by_time,
+				excluded_by_path = state.search_results.excluded_by_path,
+				excluded_by_outcome = state.search_results.excluded_by_outcome,
+				truncated = state.search_results.truncated,
+			},
+		)
+	} else {
+		window.chips = {}
 	}
 
 	if map_visible(window) {
@@ -985,4 +1053,41 @@ close :: proc(window: ^Window) {
 	}
 	sdl.Quit()
 	window^ = {}
+}
+
+// toggle_chip_at removes or restores the filter a click landed on.
+//
+// Hit tested against the rectangles draw_search recorded, not against
+// recomputed geometry. docs/07 prohibits the second copy: chips are laid out by
+// measured text width, so a reimplementation would drift as soon as a label or
+// a font changed, and the symptom would be clicks that do nothing.
+@(private)
+toggle_chip_at :: proc(
+	window: ^Window,
+	state: ^State,
+	trace: ^codec.Trace,
+	x, y: f32,
+) {
+	chip, found := ui.chip_at(&window.chips, x, y)
+	if !found {
+		return
+	}
+
+	switch chip.kind {
+	case .Family:
+		apply(state, trace, Command{kind = .Search_Toggle_Kind, family = chip.family})
+	case .Failed_Only:
+		apply(state, trace, Command{kind = .Search_Toggle_Failed_Only})
+	case .Scoped_Path:
+		// Clicking the chip removes the scope, which is what a removable chip
+		// means. Scoping is re-applied from the focus, not from the chip.
+		state.search_query.path = model.NO_ENTITY
+		run_search(state, trace)
+		state.revision += 1
+	case .Range:
+		state.search_query.start_ns = 0
+		state.search_query.end_ns = 0
+		run_search(state, trace)
+		state.revision += 1
+	}
 }
