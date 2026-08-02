@@ -5,6 +5,7 @@ import "core:os"
 import "core:strings"
 
 import "src:core"
+import "src:replay"
 import "src:trace/codec"
 import "src:trace/model"
 
@@ -140,19 +141,75 @@ command_validate :: proc(arguments: []string) -> int {
 	}
 	defer delete(data)
 
-	err := codec.validate(data, mode)
+	// Replay mode is full validation plus reconstruction of every mutation
+	// chain, so the structural checks run first and only then the replay pass.
+	check_mode := mode if mode != .Replay else codec.Validation_Mode.Full
+	err := codec.validate(data, check_mode)
 	if !core.ok(err) {
 		report_error(path, err)
 		return exit_code_for(err)
 	}
 
-	mode_name := "quick"
-	switch mode {
-	case .Quick:  mode_name = "quick"
-	case .Full:   mode_name = "full"
-	case .Replay: mode_name = "replay"
+	if mode == .Replay {
+		return command_validate_replay(path, data)
 	}
+
+	mode_name := "quick" if mode == .Quick else "full"
 	fmt.printfln("%s: valid (%s)", path, mode_name)
+	return EXIT_OK
+}
+
+// command_validate_replay reconstructs every mutation chain and reports what
+// could and could not be replayed.
+//
+// A trace containing gaps still exits zero: docs/03 treats the gap statuses as
+// legitimate recorded outcomes, and a session whose provider omitted content
+// is faithfully recorded, not corrupt. The counts go to stdout so the result
+// is greppable, and exit codes stay reserved for the file being unusable.
+@(private)
+command_validate_replay :: proc(path: string, data: []byte) -> int {
+	trace, err := codec.open_trace(data)
+	if !core.ok(err) {
+		report_error(path, err)
+		return exit_code_for(err)
+	}
+	defer codec.trace_destroy(&trace)
+
+	report, replay_err := replay.validate_replay(&trace)
+	if !core.ok(replay_err) {
+		report_error(path, replay_err)
+		return exit_code_for(replay_err)
+	}
+
+	fmt.printfln("%s: valid (replay)", path)
+	fmt.printfln("  mutations:  %d", report.mutations)
+	fmt.printfln("  verified:   %d", report.verified)
+	fmt.printfln("  unverified: %d", report.unverified)
+	if report.binary > 0 {
+		fmt.printfln("  binary:     %d", report.binary)
+	}
+
+	if report.gaps > 0 {
+		// Gaps are the point of the exercise, so they are stated plainly
+		// rather than buried under a success line.
+		fmt.printfln("  gaps:       %d", report.gaps)
+		if report.missing_baseline > 0 {
+			fmt.printfln("    missing_baseline:  %d", report.missing_baseline)
+		}
+		if report.unsupported_patch > 0 {
+			fmt.printfln("    unsupported_patch: %d", report.unsupported_patch)
+		}
+		if report.hash_mismatch > 0 {
+			fmt.printfln("    hash_mismatch:     %d", report.hash_mismatch)
+		}
+		fmt.eprintfln(
+			"norn: %s: %d of %d mutations could not be replayed",
+			path,
+			report.gaps,
+			report.mutations,
+		)
+	}
+
 	return EXIT_OK
 }
 

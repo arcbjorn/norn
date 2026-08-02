@@ -10,8 +10,8 @@ The full specification lives in [`docs/`](docs/README.md). Start with
 ## Status
 
 Early implementation. The canonical trace model, the `.norn` container codec,
-and the `inspect` and `validate` CLI commands work. The importer, replay
-engine, analysis, and native UI are not built yet.
+the replay engine, and the `inspect` and `validate` CLI commands work. The
+importer and native UI are not built yet.
 
 | Area | State |
 | --- | --- |
@@ -19,14 +19,18 @@ engine, analysis, and native UI are not built yet.
 | Canonical model (events, entities, spans, edges, mutations) | Implemented |
 | String interning and content-addressed blobs | Implemented |
 | `.norn` writer, reader, and validator | Implemented |
-| `norn inspect` / `norn validate` | Implemented |
+| Virtual repository and mutation replay | Implemented |
+| Strict unified-patch application | Implemented |
+| Snapshots, seeking, and range comparison | Implemented |
+| `norn inspect` / `norn validate` (all three modes) | Implemented |
 | Codex importer | Not started |
-| Replay engine | Not started |
+| Analysis and contributor scoring | Not started |
 | Native UI (SDL3 + WGPU) | Not started |
 
-`norn validate --mode replay` reports that it is unavailable rather than
-running a weaker check, because reporting success without verifying mutation
-chains would be worse than reporting nothing.
+Replay currently starts from an empty baseline, because capturing a repository
+baseline is the importer's job and the importer does not exist yet. A patch
+against a file replay has never seen is therefore a `missing_baseline` gap —
+the honest result for a trace that carries no baseline.
 
 ## Requirements
 
@@ -72,10 +76,12 @@ src/
   trace/
     model/       canonical semantic types, interning, blobs
     codec/       .norn reader, writer, and validator
+  replay/        virtual repository, patching, seeking, comparison
 tests/
   core/    arithmetic, path safety, checksum vectors
   model/   interning and blob identity
   codec/   roundtrip, determinism, and corruption fixtures
+  replay/  patching, mutation chains, and seek properties
 scripts/  repeatable developer commands
 ```
 
@@ -98,11 +104,16 @@ The corruption suite asserts rejection for truncation at every byte boundary,
 invalid magic and versions, size overflow, checksum mismatch, declared
 decompression bombs, and content tampering that repaired its local checksum.
 
+Replay adds its own rule: patch application is strict. A hunk whose context
+does not match exactly produces a labeled gap, never relocated or fuzzy-matched
+content. Reconstructing a file at the wrong offset would produce bytes the
+session never had, and the user could not tell by looking.
+
 ## Testing
 
 ```sh
 scripts/norn.sh test
 ```
 
-63 tests across three packages. See [Quality](docs/09-quality.md) for the
+112 tests across four packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
