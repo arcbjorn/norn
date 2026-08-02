@@ -1,244 +1,178 @@
 # Norn
 
-Norn is a native time-travel debugger for coding-agent sessions. It imports an
-agent trace, reconstructs how the repository changed, and presents prompts,
-tool calls, edits, commands, tests, and errors on one navigable timeline.
+**A native time-travel debugger for coding-agent sessions.**
 
-The full specification lives in [`docs/`](docs/README.md). Start with
-[Product](docs/00-product.md) and [Architecture](docs/02-architecture.md).
+When an agent works on a repository for an hour, it leaves a log: prompts, tool
+calls, edits, commands, tests, errors. When something ends up broken, that log
+is the only record of how it got that way — and reading it linearly is the worst
+possible way to find out.
 
-## Status
+Norn imports the log into a queryable trace, reconstructs the repository at
+every point in the session, and lets you start from the failure and work
+backward through the evidence that preceded it.
 
-Early implementation. The canonical trace model, the `.norn` container codec,
-the import pipeline, the replay engine, evidence analysis, redacted export, and
-the native UI all work. `norn import` converts a session log into a validated
-trace, and the whole workflow — import, validate, replay, diagnose, export —
-runs end to end.
+<p align="center">
+  <img src="docs/images/pipeline.svg" alt="A session log and a read-only repository feed the import stage, which produces a .norn trace that replay, analysis, and export read." width="100%">
+</p>
 
-The one significant gap is a provider adapter. docs/05 requires adapter support
-to rest on fixtures rather than assumptions, and pinning a provider schema needs
-real sample traces. Until then Norn imports [NSL](docs/14-nsl-format.md), a
-session-log format it defines and owns, which exercises every mapping
-requirement in the adapter contract and generates the fixture tiers.
+## Why it works this way
 
-| Area | State |
-| --- | --- |
-| Core safety (checked arithmetic, paths, limits, CRC32C) | Implemented |
-| Canonical model (events, entities, spans, edges, mutations) | Implemented |
-| String interning and content-addressed blobs | Implemented |
-| `.norn` writer, reader, and validator | Implemented |
-| Virtual repository and mutation replay | Implemented |
-| Strict unified-patch application | Implemented |
-| Snapshots, seeking, and range comparison | Implemented |
-| Typed event payloads (diagnostics, commands, tests) | Implemented |
-| Comparable outcomes and candidate windows | Implemented |
-| Versioned contributor scoring and evidence stacks | Implemented |
-| Attempt and retry-loop detection | Implemented |
-| Redacted HTML and canonical JSON export | Implemented |
-| `norn inspect` / `validate` / `explain` / `export` | Implemented |
-| Importer contract, record sink, redaction | Implemented |
-| Import pipeline and repository identity capture | Implemented |
-| Repository baseline capture and replay | Implemented |
-| Baseline verification against recorded digests | Implemented |
-| Search and composable filters | Implemented |
-| Search bar with removable filter chips | Implemented |
-| Search text entry and empty-panel explanations | Implemented |
-| NSL adapter and deterministic fixture generator | Implemented |
-| `norn import` | Implemented |
-| Codex adapter (needs real sample traces) | Not started |
-| Annotation overlays and bookmarks | Not started |
-| SDL3 + WGPU stack validation (decision 002) | Confirmed |
-| Text rendering and glyph atlas validation | Confirmed |
-| Timeline viewport, virtualization, hit testing | Implemented |
-| Draw lists, batching, timeline panel | Implemented |
-| WGPU backend (pipelines, instance ring, scissor) | Implemented |
-| Window, frame loop, keyboard navigation | Implemented |
-| Glyph atlas, text layout, lane labels | Implemented |
-| Event inspector with evidence stack | Implemented |
-| Line diffing and the diff viewer panel | Implemented |
-| All four diff comparison modes | Implemented |
-| Deterministic graph layout and repository map | Implemented |
-| Replay driven from the playhead | Implemented |
-| Hostile fixture suite and security gate | Implemented |
-| Replay seek benchmark | Implemented |
+**A trace is evidence, so it is treated as untrusted.** The log came from a tool
+that may have been compromised, and it may have been shared or downloaded.
+Opening one executes nothing, writes to no repository, resolves no path outside
+the selected root, and fetches no URL. Import is the only stage that runs
+another program at all — `git`, with a fixed argument vector built from
+validated input.
 
-Import captures a repository baseline: the starting content of every path the
-session touched, read from the recorded commit with `git show` when the tree is
-clean and from the working tree otherwise, and labelled `commit_verified` or
-`working_tree_observational` accordingly. A patch against a file that existed
-before the session therefore reconstructs, where it used to be a
-`missing_baseline` gap.
+**Reconstruction is verified or it is labelled a gap.** A patch whose context
+does not match exactly is never fuzzy-matched into place; it produces a recorded
+gap. Content is shown as verified only when a recorded hash confirms it.
+Producing plausible-looking bytes the session never had would be worse than
+producing nothing, because nothing about the result would look wrong.
 
-The manifest records only what was actually observed. docs/06 forbids implying
-that unobserved paths were absent, so three outcomes stay distinct: content was
-read, absence was observed, or nothing was observed. A path refused at the
-repository boundary — a symlink pointing outside it, say — falls in the third
-group and produces no entry at all, because claiming absence for a file that
-plainly exists would be a false observation.
+**Analysis ranks candidates and never claims a cause.** Evidence is separated
+into explicit, reconstructed, and inferred; every score expands into the
+deterministic rules that produced it; and a replay gap visibly caps confidence.
+The interface says "candidate contributor," never "the cause."
 
-## Requirements
+## What using it looks like
 
-- Odin `dev-2026-07` (pinned in [`.odin-version`](.odin-version))
-- Clang and the macOS command-line tools
+<p align="center">
+  <img src="docs/images/workspace.svg" alt="The Norn workspace: a search bar above a repository map, timeline, and inspector, with a diff panel across the bottom." width="100%">
+</p>
+
+Select a failing test. The inspector shows the evidence behind it — the outcome,
+the edits since the last comparable pass, the reads and tool results tied to
+those edits, and ranked candidates with their reasoning. Move the playhead and
+every panel follows: the diff shows that file as it stood at that instant, the
+map recolours, the timeline scrolls.
+
+Everything is reachable from the keyboard.
+
+## Quick start
 
 ```sh
-brew install odin
-```
+brew install odin sdl3
+scripts/bootstrap-graphics.sh          # stb sources + pinned wgpu-native
 
-The CLI needs nothing further. Building the graphics spike (and eventually the
-UI) also needs SDL3 and wgpu-native:
+scripts/norn.sh build
+scripts/norn.sh fixture tiny out.jsonl # a generated session log
 
-```sh
-brew install sdl3
-scripts/bootstrap-graphics.sh
+build/norn import out.jsonl --repo . --out session.norn
+build/norn open session.norn
 ```
 
 `bootstrap-graphics.sh` compiles Odin's vendored stb sources and fetches the
-pinned upstream wgpu-native release. Odin ships neither ready to use on macOS,
-and the Homebrew wgpu package reports a version its bindings reject — see
-[Spike results](docs/13-spike-results.md).
+pinned upstream wgpu-native release; Odin ships neither ready to use on macOS,
+and the Homebrew wgpu package reports a version its bindings reject. Requires
+Odin `dev-2026-07` (pinned in [`.odin-version`](.odin-version)) and the macOS
+command-line tools. The CLI alone needs nothing beyond Odin.
 
 ## Commands
 
-All development commands route through one script, so CI and developers invoke
-the same thing:
-
 ```sh
-scripts/norn.sh build [debug|release|sanitize|profile]
-scripts/norn.sh test [package]
-scripts/norn.sh check
-scripts/norn.sh fixture <tiny|representative|reference|stress> [out]
-scripts/norn.sh bench <trace.norn>
-scripts/norn.sh spike graphics [--frames N] [--events N]
-scripts/norn.sh spike text [--frames N]
-scripts/norn.sh spike backend [--frames N]
-scripts/norn.sh clean
-```
-
-The product CLI:
-
-```sh
-norn open    <trace.norn>
-norn import  <source> --repo <path> [--format <id>] [--out file.norn] [--dry-run]
-norn inspect <trace.norn> [--json]
+norn open     <trace.norn>
+norn import   <source> --repo <path> [--format <id>] [--out file.norn] [--dry-run]
+norn inspect  <trace.norn> [--json]
 norn validate <trace.norn> [--mode quick|full|replay]
-norn explain <trace.norn> --list
-norn explain <trace.norn> --event <id>
-norn export  <trace.norn> --out <dir> [--range start:end] [--event <id>]
+norn explain  <trace.norn> --list | --event <id>
+norn export   <trace.norn> --out <dir> [--range start:end] [--event <id>]
 ```
 
-`import` reads a session log and writes a validated `.norn` trace. It never
-executes the source or anything named inside it, redacts before writing, and
-reports what it repaired, ignored, or replaced. `--dry-run` reports what a
-source contains — including record types the adapter cannot map — without
-writing output.
+**`import`** converts a session log into a validated trace. It never executes
+the source or anything named in it, redacts before writing, captures the
+repository baseline so edits to pre-existing files can be replayed, and reports
+what it repaired, ignored, or replaced. `--dry-run` reports what a source
+contains — including record types no adapter can map — without writing output.
 
-`open` launches the desktop application: a virtualized timeline with the
-keyboard navigation from [User experience](docs/01-user-experience.md) — arrows
-step between events, Shift between mutations, Command between outcomes, Space
-plays, brackets set a comparison range, and Escape backs out one layer at a
-time. Clicking an event opens it in the inspector, which shows its attributes
-and provenance, and for an outcome the ranked evidence behind it. Focusing a file with `F`
-reconstructs its content at the playhead in the panel below, labelled with how
-much replay could verify. `/` opens the search bar over event text, paths, command lines, diagnostics,
-tool arguments, and event identifiers; `N` and `Shift+N` step the matches,
-moving the whole workspace to each. Filters appear as chips that toggle on
-click, and the bar states the outcome in words — how many matched, how many a
-filter removed, and which filter removed the most. An empty result always says
-whether nothing matched or a filter hid it, because docs/01 forbids a hidden
-filter explaining an apparently missing event. Escape closes search and
-restores the unfiltered view rather than leaving a filter behind.
-`D` cycles the four comparisons from
-[User experience](docs/01-user-experience.md): state at the playhead, since the
-previous change, since session start, and across the bracket-selected range.
-The repository map on the left shows the files a session touched, sized by
-activity and coloured by outcome; clicking one focuses it.
+**`open`** launches the desktop application. Arrows step events, Shift steps
+mutations, Command steps outcomes; `[` and `]` set a comparison range; `F`
+focuses a file; `D` cycles the four diff comparisons; `/` searches; Escape backs
+out one layer at a time.
 
-`explain` is the diagnosis workflow: select a failed outcome and it reports the
-evidence behind it, separated into explicit, reconstructed, and inferred
-levels, with every candidate score expanding into the deterministic rules that
-produced it. Candidates are labeled candidates, never causes.
+**`explain`** is the diagnosis workflow at the terminal: select a failed outcome
+and it prints the ranked evidence behind it, each candidate expanding into the
+rules that scored it.
 
-`export` writes that same evidence as a self-contained HTML report plus
-canonical JSON. It prints an inclusion manifest before writing, excludes prompt
-text and raw provider records by default, and creates files readable only by
-their owner.
+**`export`** writes that evidence as a self-contained HTML report plus canonical
+JSON. It prints an inclusion manifest first, and excludes prompt text and raw
+provider records by default.
 
 Machine-readable output goes to stdout and diagnostics to stderr, so
-`norn inspect --json` can be piped without filtering. Exit codes: `0` success,
-`2` usage, `3` unreadable input, `4` invalid trace, `5` unsupported feature.
+`norn inspect --json` pipes cleanly. Exit codes: `0` success, `2` usage,
+`3` unreadable input, `4` invalid trace, `5` unsupported feature.
+
+## The trace format
+
+<p align="center">
+  <img src="docs/images/container.svg" alt="The .norn container: a 64-byte header, columnar chunks each carrying a CRC32C, a chunk directory, and a 96-byte footer holding a SHA-256 digest." width="100%">
+</p>
+
+A `.norn` file is a columnar container: events, entities, mutations, and typed
+payloads in parallel arrays rather than a document tree, so a reader can query a
+time range without decoding the session. Strings are interned, file content is
+content-addressed by SHA-256, and every chunk carries its own checksum verified
+before the payload is decoded.
+
+The format is specified in [Trace format](docs/04-trace-format.md).
+
+## Status
+
+The canonical model, container codec, import pipeline, replay engine, evidence
+analysis, redacted export, and native UI all work, and the full workflow —
+import, validate, replay, diagnose, export — runs end to end.
+
+The significant gap is a **provider adapter**. [Importers](docs/05-importers.md)
+requires adapter support to rest on fixtures rather than assumptions, and
+pinning a real provider's schema needs real sample traces. Until those exist,
+Norn imports [NSL](docs/14-nsl-format.md) — a session-log format it defines and
+owns, which exercises every mapping requirement in the adapter contract and
+generates the fixture tiers. Annotation overlays and bookmarks are also not
+built.
 
 ## Repository layout
 
 ```text
-docs/     product and engineering specification
+docs/            product and engineering specification
 src/
   core/          checked arithmetic, errors, limits, paths, CRC32C
   main/          CLI entry point and commands
-  trace/
-    model/       canonical semantic types, interning, blobs
-    codec/       .norn reader, writer, and validator
+  trace/model/   canonical semantic types, interning, blobs
+  trace/codec/   .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison, diffing
-  analysis/      outcomes, comparability, scoring, evidence, attempts, graph
+  analysis/      outcomes, comparability, scoring, evidence, attempts, search
   app/           selection, commands, replay session, window, frame loop
   render/        draw lists, primitives, batching, fonts, WGPU backend
-  ui/            viewport transforms, virtualization, and the four panels
+  ui/            viewport transforms, virtualization, panels
   export/        bundle assembly, HTML report, canonical JSON
-  importers/
-    api/         adapter contract, record sink, redaction, pipeline
-    nsl/         the Norn Session Log adapter
-  tools/
-    genfixture/  deterministic fixture generation
-    bench/       replay seek and reconstruction benchmark
-tests/
-  core/    arithmetic, path safety, checksum vectors
-  model/   interning and blob identity
-  codec/   roundtrip, determinism, and corruption fixtures
-  replay/  patching, mutation chains, seek properties, diff reconstruction
-  analysis/ comparability, scoring weights, evidence ordering, layout
-  export/  encoding, injection resistance, and determinism
-  importers/ redaction rules, sink invariants, detection, pipeline, digests
-  nsl/     adapter mapping, malformed input, streaming bounds
-  fixtures/hostile/  adversarial sources for the security gate
-  render/  draw list culling, clipping, batching, glyph atlases
-  ui/      transform inverses, virtualization, and drawn output
-  app/     command routing, keyboard bindings, playback, playhead replay
-spike/    throwaway phase-zero validation programs
-scripts/  repeatable developer commands
+  importers/     adapter contract, record sink, redaction, NSL adapter
+  tools/         fixture generator, replay benchmark
+tests/           one package per source package, plus hostile fixtures
+scripts/         build, test, security gate, fixtures, benchmarks
 ```
 
-Dependencies flow inward toward `trace/model`. Circular package dependencies
-are prohibited.
+Dependencies flow inward toward `trace/model`; circular package dependencies are
+prohibited.
 
 ## Safety properties
 
-These are enforced in code and covered by tests, not merely documented:
+Enforced in code and covered by tests, not merely documented:
 
 - opening a trace executes nothing and writes to no repository;
 - every length and offset from untrusted input is overflow-checked before use;
-- recorded paths are rejected unless they normalize to repository-relative
-  form, and `..` is never resolved against an earlier component;
-- checksums are verified before any structured payload is decoded;
-- an unfinalized or truncated file is refused rather than partially opened;
-- declared decompression ratios are bounded before allocation.
+- recorded paths must normalize to repository-relative form, and `..` is never
+  resolved against an earlier component;
+- checksums are verified before any structured payload is decoded, and an
+  unfinalized or truncated file is refused rather than partially opened;
+- exports declare a restrictive content security policy, contain no script
+  element, and reference no remote resource, so trace content renders as text;
+- redaction runs before the writer, so a secret never reaches the artifact.
 
-The corruption suite asserts rejection for truncation at every byte boundary,
-invalid magic and versions, size overflow, checksum mismatch, declared
-decompression bombs, and content tampering that repaired its local checksum.
-
-Exports are self-contained: the HTML report declares a restrictive content
-security policy, contains no script element, and references no remote resource,
-so a trace containing markup renders as text rather than executing.
-
-The timeline enforces one more: hit testing and drawing share a single
-transform. docs/07 prohibits duplicate coordinate math because two formulas
-drift, so clicking always selects what was drawn — asserted by a property test
-over a thousand random timestamps.
-
-Replay adds its own rule: patch application is strict. A hunk whose context
-does not match exactly produces a labeled gap, never relocated or fuzzy-matched
-content. Reconstructing a file at the wrong offset would produce bytes the
-session never had, and the user could not tell by looking.
+Two more are worth naming because they are easy to lose in a refactor. Hit
+testing and drawing share a single transform, so a click always selects what was
+drawn. And patch application is strict: reconstructing a file at the wrong
+offset would produce bytes the session never had, and nothing about the result
+would look wrong.
 
 ## Testing
 
@@ -246,13 +180,21 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-537 tests across eleven packages, plus 49 CLI contract checks and 122 security
-checks against the hostile fixtures. See [Quality](docs/09-quality.md) for the
-intended test layers and release gates.
+537 tests across eleven packages, 49 CLI contract checks, and 122 security
+checks. The security gate runs every fixture in `tests/fixtures/hostile` through
+the built binary and asserts outcomes rather than mechanisms: no sentinel file
+was created, the repository hash is unchanged, no export leaked a secret or
+produced active markup, memory stayed bounded. It found a buffer overflow in
+JSON string decoding on its first run.
 
-The security gate (`scripts/test-security.sh`) runs every fixture in
-`tests/fixtures/hostile` through the built binary and asserts the outcome rather
-than the mechanism: no sentinel file was created, the repository hash is
-unchanged, no export leaked a secret or produced active markup, and memory
-stayed bounded. It found a buffer overflow in JSON string decoding on its first
-run — see [Spike results](docs/13-spike-results.md).
+See [Quality](docs/09-quality.md) for the test layers and release gates, and
+[Engineering notes](docs/13-engineering-notes.md) for measurements and the
+mistakes behind them.
+
+## Documentation
+
+The full specification is in [`docs/`](docs/README.md). Start with
+[Product](docs/00-product.md) for scope and
+[Architecture](docs/02-architecture.md) for structure. The documents are
+normative: where this README and a specification disagree, the specification is
+correct.

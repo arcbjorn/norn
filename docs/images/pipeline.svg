@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 300" width="880" height="300" role="img" aria-label="Norn pipeline: an untrusted session log is imported into a validated .norn trace, which replay, analysis, and export read.">
+  <title>Norn pipeline</title>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    </marker>
+  </defs>
+
+  <!-- Untrusted region -->
+  <rect x="12" y="46" width="196" height="200" rx="8" fill="none" stroke="#b04a44" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="110" y="70" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#b04a44">UNTRUSTED</text>
+
+  <!-- Source log -->
+  <rect x="36" y="118" width="148" height="56" rx="6" fill="#6b7280" fill-opacity="0.16" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="110" y="142" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#6b7280">session log</text>
+  <text x="110" y="160" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#6b7280">NSL / provider</text>
+
+  <!-- Repository -->
+  <rect x="36" y="196" width="148" height="38" rx="6" fill="#6b7280" fill-opacity="0.16" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="110" y="220" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#6b7280">repository (read-only)</text>
+
+  <!-- Import -->
+  <rect x="256" y="106" width="150" height="80" rx="6" fill="#3b7dbd" fill-opacity="0.18" stroke="#3b7dbd" stroke-width="1.75"/>
+  <text x="331" y="132" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#3b7dbd">import</text>
+  <text x="331" y="152" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">detect · parse · redact</text>
+  <text x="331" y="168" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">baseline · validate</text>
+
+  <!-- Trace -->
+  <rect x="454" y="106" width="150" height="80" rx="6" fill="#2f8f63" fill-opacity="0.18" stroke="#2f8f63" stroke-width="1.75"/>
+  <text x="529" y="132" text-anchor="middle" font-family="ui-monospace, monospace" font-size="14" font-weight="600" fill="#2f8f63">.norn</text>
+  <text x="529" y="152" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">columnar · checksummed</text>
+  <text x="529" y="168" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">content-addressed</text>
+
+  <!-- Consumers -->
+  <rect x="668" y="54" width="196" height="44" rx="6" fill="#6b7280" fill-opacity="0.12" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="766" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#6b7280">replay</text>
+  <text x="766" y="90" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">file state at any moment</text>
+
+  <rect x="668" y="124" width="196" height="44" rx="6" fill="#6b7280" fill-opacity="0.12" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="766" y="144" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#6b7280">analysis</text>
+  <text x="766" y="160" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">ranked evidence</text>
+
+  <rect x="668" y="194" width="196" height="44" rx="6" fill="#6b7280" fill-opacity="0.12" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="766" y="214" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#6b7280">export</text>
+  <text x="766" y="230" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">inert HTML + JSON</text>
+
+  <!-- Flows -->
+  <line x1="184" y1="146" x2="248" y2="146" stroke="#6b7280" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <path d="M 184 215 L 216 215 L 216 168 L 248 168" fill="none" stroke="#6b7280" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <line x1="406" y1="146" x2="446" y2="146" stroke="#6b7280" stroke-width="1.75" marker-end="url(#arrow)"/>
+
+  <path d="M 604 146 L 636 146 L 636 76 L 660 76" fill="none" stroke="#6b7280" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <line x1="604" y1="146" x2="660" y2="146" stroke="#6b7280" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <path d="M 604 146 L 636 146 L 636 216 L 660 216" fill="none" stroke="#6b7280" stroke-width="1.75" marker-end="url(#arrow)"/>
+
+  <!-- Boundary annotation -->
+  <text x="331" y="206" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-style="italic" fill="#b04a44">the only stage that runs a program</text>
+  <text x="331" y="222" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-style="italic" fill="#b04a44">(git, fixed argv)</text>
+
+  <text x="529" y="212" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-style="italic" fill="#2f8f63">opening this executes nothing</text>
+</svg>

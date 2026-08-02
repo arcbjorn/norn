@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 330" width="880" height="330" role="img" aria-label="The .norn container: a 64-byte header, columnar chunks each with its own CRC32C, a chunk directory, and a 96-byte footer holding a SHA-256 digest of everything after the header.">
+  <title>The .norn container</title>
+
+  <defs>
+    <marker id="tick" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    </marker>
+  </defs>
+
+  <!-- File header -->
+  <rect x="20" y="60" width="96" height="64" rx="4" fill="#3b7dbd" fill-opacity="0.18" stroke="#3b7dbd" stroke-width="1.5"/>
+  <text x="68" y="84" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#3b7dbd">header</text>
+  <text x="68" y="99" text-anchor="middle" font-family="ui-monospace, monospace" font-size="9" fill="#6b7280">64 B</text>
+  <text x="68" y="113" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8" fill="#6b7280">NORNTRCE</text>
+
+  <!-- Chunks -->
+  <rect x="124" y="60" width="92" height="64" rx="4" fill="#2f8f63" fill-opacity="0.16" stroke="#2f8f63" stroke-width="1.5"/>
+  <text x="170" y="84" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#2f8f63">strings</text>
+  <text x="170" y="99" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#6b7280">interned</text>
+  <text x="170" y="113" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8" fill="#6b7280">crc32c</text>
+
+  <rect x="224" y="60" width="92" height="64" rx="4" fill="#2f8f63" fill-opacity="0.16" stroke="#2f8f63" stroke-width="1.5"/>
+  <text x="270" y="84" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#2f8f63">events</text>
+  <text x="270" y="99" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#6b7280">columnar</text>
+  <text x="270" y="113" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8" fill="#6b7280">crc32c</text>
+
+  <rect x="324" y="60" width="92" height="64" rx="4" fill="#2f8f63" fill-opacity="0.16" stroke="#2f8f63" stroke-width="1.5"/>
+  <text x="370" y="84" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#2f8f63">mutations</text>
+  <text x="370" y="99" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#6b7280">+ baseline</text>
+  <text x="370" y="113" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8" fill="#6b7280">crc32c</text>
+
+  <rect x="424" y="60" width="92" height="64" rx="4" fill="#2f8f63" fill-opacity="0.16" stroke="#2f8f63" stroke-width="1.5"/>
+  <text x="470" y="84" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#2f8f63">blobs</text>
+  <text x="470" y="99" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#6b7280">sha-256 keyed</text>
+  <text x="470" y="113" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8" fill="#6b7280">crc32c</text>
+
+  <rect x="524" y="60" width="92" height="64" rx="4" fill="#2f8f63" fill-opacity="0.16" stroke="#2f8f63" stroke-width="1.5"/>
+  <text x="570" y="84" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#2f8f63">payloads</text>
+  <text x="570" y="99" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#6b7280">typed</text>
+  <text x="570" y="113" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8" fill="#6b7280">crc32c</text>
+
+  <!-- Directory -->
+  <rect x="624" y="60" width="106" height="64" rx="4" fill="#6b7280" fill-opacity="0.16" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="677" y="84" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#6b7280">directory</text>
+  <text x="677" y="99" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#6b7280">kind → offset</text>
+  <text x="677" y="113" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#6b7280">canonical order</text>
+
+  <!-- Footer -->
+  <rect x="738" y="60" width="122" height="64" rx="4" fill="#3b7dbd" fill-opacity="0.18" stroke="#3b7dbd" stroke-width="1.5"/>
+  <text x="799" y="84" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#3b7dbd">footer</text>
+  <text x="799" y="99" text-anchor="middle" font-family="ui-monospace, monospace" font-size="9" fill="#6b7280">96 B · sha-256</text>
+  <text x="799" y="113" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8" fill="#6b7280">NORNEND!</text>
+
+  <!-- Digest span -->
+  <line x1="124" y1="146" x2="860" y2="146" stroke="#6b7280" stroke-width="1.25" marker-start="url(#tick)" marker-end="url(#tick)"/>
+  <text x="492" y="164" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">the footer digest covers every byte after the header</text>
+  <text x="492" y="180" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-style="italic" fill="#6b7280">the header is excluded because it is patched last; it carries its own CRC32C</text>
+
+  <!-- Volatile marker -->
+  <line x1="20" y1="134" x2="116" y2="134" stroke="#b04a44" stroke-width="1.25"/>
+  <text x="68" y="150" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#b04a44">session id</text>
+  <text x="68" y="162" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#b04a44">created at</text>
+
+  <!-- Determinism note -->
+  <rect x="20" y="206" width="840" height="52" rx="6" fill="#2f8f63" fill-opacity="0.08" stroke="#2f8f63" stroke-width="1.25"/>
+  <text x="36" y="228" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#2f8f63">Determinism</text>
+  <text x="36" y="246" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">Two imports of one source differ in exactly 24 bytes — the session identity and creation time, both in the header. Every chunk byte is identical.</text>
+
+  <!-- Reading note -->
+  <text x="36" y="288" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">A reader locates chunks through the directory, verifies a checksum before decoding any payload, and refuses a file whose completion marker is absent.</text>
+  <text x="36" y="306" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">Truncation at any byte boundary is rejected rather than partially opened.</text>
+</svg>
