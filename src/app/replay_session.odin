@@ -255,6 +255,82 @@ previous_mutation_content :: proc(
 	return copied, true
 }
 
+// content_at reconstructs a path at an arbitrary moment.
+//
+// The shared engine is seeked and restored, because every panel in a frame
+// reads the same engine and leaving it moved would make them describe
+// different instants — the divergence docs/01 forbids.
+//
+// The result is copied: the engine's content store is reused as it seeks, so a
+// borrowed slice would not survive the restore.
+content_at :: proc(
+	session: ^Replay_Session,
+	trace: ^codec.Trace,
+	path: model.Entity_Id,
+	playhead_ns: i64,
+	allocator := context.allocator,
+) -> (
+	content: []byte,
+	available: bool,
+) {
+	if !session.usable || path == model.NO_ENTITY {
+		return nil, false
+	}
+
+	saved := session.position
+	defer {
+		replay.seek(&session.timeline, &session.engine, saved)
+		session.position = saved
+	}
+
+	replay.seek(&session.timeline, &session.engine, sequence_at_time(trace, playhead_ns))
+	resolved := replay.resolve(&session.engine, path)
+	if !replay.has_content(resolved) {
+		// An empty file and an unreconstructable one are different facts. The
+		// caller distinguishes them by checking the current status separately;
+		// here, absence of content means there is nothing to compare against.
+		return nil, false
+	}
+
+	copied := make([]byte, len(resolved.content), allocator)
+	copy(copied, resolved.content)
+	return copied, true
+}
+
+// baseline_content returns a path's state at the start of the session.
+//
+// Used by the "since session start" mode. Distinct from content_at with a
+// zero playhead because a session's first instant is not necessarily zero,
+// and using zero would compare against a moment before the trace begins.
+baseline_content :: proc(
+	session: ^Replay_Session,
+	path: model.Entity_Id,
+	allocator := context.allocator,
+) -> (
+	content: []byte,
+	available: bool,
+) {
+	if !session.usable || path == model.NO_ENTITY {
+		return nil, false
+	}
+
+	saved := session.position
+	defer {
+		replay.seek(&session.timeline, &session.engine, saved)
+		session.position = saved
+	}
+
+	replay.seek(&session.timeline, &session.engine, 0)
+	resolved := replay.resolve(&session.engine, path)
+	if !replay.has_content(resolved) {
+		return nil, false
+	}
+
+	copied := make([]byte, len(resolved.content), allocator)
+	copy(copied, resolved.content)
+	return copied, true
+}
+
 // gap_count reports how many mutations could not be replayed so far.
 //
 // Surfaced so the interface can say the reconstruction is partial rather than

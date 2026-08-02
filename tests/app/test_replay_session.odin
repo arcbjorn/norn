@@ -7,6 +7,7 @@ import "src:app"
 import "src:replay"
 import "src:trace/codec"
 import "src:trace/model"
+import "src:ui"
 
 // Replay driven from the playhead.
 //
@@ -339,4 +340,118 @@ replay_reports_gaps_rather_than_hiding_them :: proc(t: ^testing.T) {
 	// Every mutation in this fixture carries full content, so nothing is a
 	// gap. A non-zero count here would mean replay failed silently.
 	testing.expect_value(t, app.replay_gap_count(&fixture.session), 0)
+}
+
+// ---------------------------------------------------------------------------
+// Comparison modes
+// ---------------------------------------------------------------------------
+
+@(test)
+the_mode_cycle_reaches_every_comparison :: proc(t: ^testing.T) {
+	// docs/01 lists four views of a file. A cycle that skipped one would make
+	// it unreachable, and a cycle that did not return would strand the user in
+	// whichever mode they pressed last.
+	seen := make(map[ui.Diff_Mode]bool)
+	defer delete(seen)
+
+	mode := ui.Diff_Mode.At_Playhead
+	for _ in 0 ..< 4 {
+		seen[mode] = true
+		mode = app.next_diff_mode(mode)
+	}
+
+	testing.expect_value(t, len(seen), 4)
+	testing.expect_value(t, mode, ui.Diff_Mode.At_Playhead)
+}
+
+@(test)
+cycling_the_mode_resets_the_scroll :: proc(t: ^testing.T) {
+	// A different comparison is a different document, so a scroll position
+	// from the previous one points at an unrelated line.
+	fixture: Fixture
+	make_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	app.apply(
+		&fixture.state,
+		&fixture.trace,
+		app.Command{kind = .Scroll_Diff, lines = 40},
+	)
+	testing.expect_value(t, fixture.state.diff_scroll_lines, 40)
+
+	app.apply(&fixture.state, &fixture.trace, app.Command{kind = .Cycle_Diff_Mode})
+	testing.expect_value(t, fixture.state.diff_scroll_lines, 0)
+}
+
+@(test)
+diff_scrolling_stops_at_the_top :: proc(t: ^testing.T) {
+	fixture: Fixture
+	make_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	testing.expect(
+		t,
+		!app.apply(&fixture.state, &fixture.trace, app.Command{kind = .Scroll_Diff, lines = -5}),
+		"scrolling above the first line must report no change",
+	)
+	testing.expect_value(t, fixture.state.diff_scroll_lines, 0)
+}
+
+@(test)
+content_at_reconstructs_an_arbitrary_moment :: proc(t: ^testing.T) {
+	fixture: Replay_Fixture
+	if !make_replay_fixture(&fixture) {
+		testing.fail_now(t, "the fixture must be replayable")
+	}
+	defer replay_fixture_destroy(&fixture)
+
+	app.seek_to(&fixture.session, &fixture.trace, 4 * SECOND)
+
+	earlier, available := app.content_at(&fixture.session, &fixture.trace, fixture.path, SECOND)
+	testing.expect(t, available)
+	defer delete(earlier)
+	testing.expect_value(t, string(earlier), "one\ntwo\n")
+
+	// The shared engine must be back where the playhead left it, or the other
+	// panels would read a different moment this frame.
+	current := app.resolve_path(&fixture.session, fixture.path)
+	testing.expect_value(t, string(current.content), "one\ntwo\nthree\nfour\nfive\n")
+}
+
+@(test)
+baseline_content_is_the_session_start :: proc(t: ^testing.T) {
+	// The fixture creates its file at the first event, so there is no content
+	// before it. Reporting some would invent history.
+	fixture: Replay_Fixture
+	if !make_replay_fixture(&fixture) {
+		testing.fail_now(t, "the fixture must be replayable")
+	}
+	defer replay_fixture_destroy(&fixture)
+
+	app.seek_to(&fixture.session, &fixture.trace, 4 * SECOND)
+	_, available := app.baseline_content(&fixture.session, fixture.path)
+	testing.expect(t, !available, "a file created during the session has no baseline")
+}
+
+@(test)
+comparing_across_a_range_uses_its_earlier_end :: proc(t: ^testing.T) {
+	// The brackets can be pressed in either order, so the comparison must use
+	// the earlier instant regardless of which was marked first.
+	fixture: Replay_Fixture
+	if !make_replay_fixture(&fixture) {
+		testing.fail_now(t, "the fixture must be replayable")
+	}
+	defer replay_fixture_destroy(&fixture)
+
+	app.seek_to(&fixture.session, &fixture.trace, 4 * SECOND)
+
+	from_early, ok_early := app.content_at(
+		&fixture.session,
+		&fixture.trace,
+		fixture.path,
+		1 * SECOND,
+	)
+	testing.expect(t, ok_early)
+	defer delete(from_early)
+	testing.expect_value(t, string(from_early), "one\ntwo\n")
 }

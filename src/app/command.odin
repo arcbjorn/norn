@@ -45,6 +45,10 @@ Command_Kind :: enum u8 {
 	// Filters.
 	Toggle_Lane,
 
+	// Diff panel.
+	Cycle_Diff_Mode,
+	Scroll_Diff,
+
 	// Lifecycle.
 	Quit,
 }
@@ -63,6 +67,8 @@ Command :: struct {
 	factor: f64,
 	// Lane for Toggle_Lane.
 	lane: ui.Lane,
+	// Line delta for Scroll_Diff.
+	lines: int,
 }
 
 // Modifiers carried by a key event.
@@ -102,6 +108,9 @@ Key :: enum u8 {
 	Digit_5,
 	Digit_6,
 	Digit_7,
+	D,
+	Page_Up,
+	Page_Down,
 }
 
 // command_for_key translates a keystroke into a command.
@@ -155,6 +164,15 @@ command_for_key :: proc(
 	case .Home:
 		return Command{kind = .Fit_Session}
 
+	case .D:
+		return Command{kind = .Cycle_Diff_Mode}
+
+	case .Page_Up:
+		return Command{kind = .Scroll_Diff, lines = -20}
+
+	case .Page_Down:
+		return Command{kind = .Scroll_Diff, lines = 20}
+
 	case .Digit_1: return Command{kind = .Toggle_Lane, lane = .Conversation}
 	case .Digit_2: return Command{kind = .Toggle_Lane, lane = .Tools}
 	case .Digit_3: return Command{kind = .Toggle_Lane, lane = .Files}
@@ -203,6 +221,8 @@ State :: struct {
 	inspector_scroll: f32,
 	// Vertical scroll of the diff panel, in lines.
 	diff_scroll_lines: int,
+	// Which comparison the diff panel shows.
+	diff_mode: ui.Diff_Mode,
 
 	// Set when the user asked to quit.
 	quitting: bool,
@@ -374,10 +394,44 @@ apply :: proc(state: ^State, trace: ^codec.Trace, command: Command) -> (changed:
 		} else {
 			state.lanes += {command.lane}
 		}
+
+	case .Cycle_Diff_Mode:
+		state.diff_mode = next_diff_mode(state.diff_mode)
+		// A new comparison is a different document, so the previous scroll
+		// position means nothing in it.
+		state.diff_scroll_lines = 0
+
+	case .Scroll_Diff:
+		if command.lines == 0 {
+			return false
+		}
+		scrolled := state.diff_scroll_lines + command.lines
+		if scrolled < 0 {
+			scrolled = 0
+		}
+		if scrolled == state.diff_scroll_lines {
+			return false
+		}
+		state.diff_scroll_lines = scrolled
 	}
 
 	state.revision += 1
 	return true
+}
+
+// next_diff_mode advances through the comparisons docs/01 lists.
+//
+// A cycle rather than a menu: there are four, the order is meaningful — state,
+// then progressively wider comparisons — and a single key is faster than
+// hunting for a control while reading a diff.
+next_diff_mode :: proc "contextless" (mode: ui.Diff_Mode) -> ui.Diff_Mode {
+	switch mode {
+	case .At_Playhead:            return .From_Previous_Mutation
+	case .From_Previous_Mutation: return .From_Session_Start
+	case .From_Session_Start:     return .Across_Range
+	case .Across_Range:           return .At_Playhead
+	}
+	return .At_Playhead
 }
 
 // Step_Filter selects which events navigation stops at.

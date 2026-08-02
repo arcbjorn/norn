@@ -40,6 +40,7 @@ and native UI are not built yet.
 | Glyph atlas, text layout, lane labels | Implemented |
 | Event inspector with evidence stack | Implemented |
 | Line diffing and the diff viewer panel | Implemented |
+| All four diff comparison modes | Implemented |
 | Repository map panel | Not started |
 | Replay driven from the playhead | Implemented |
 
@@ -103,7 +104,9 @@ plays, brackets set a comparison range, and Escape backs out one layer at a
 time. Clicking an event opens it in the inspector, which shows its attributes
 and provenance, and for an outcome the ranked evidence behind it. Focusing a file with `F`
 reconstructs its content at the playhead in the panel below, labelled with how
-much replay could verify.
+much replay could verify. `D` cycles the four comparisons from
+[User experience](docs/01-user-experience.md): state at the playhead, since the
+previous change, since session start, and across the bracket-selected range.
 
 `explain` is the diagnosis workflow: select a failed outcome and it reports the
 evidence behind it, separated into explicit, reconstructed, and inferred
@@ -188,5 +191,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-334 tests across nine packages. See [Quality](docs/09-quality.md) for the
+340 tests across nine packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.

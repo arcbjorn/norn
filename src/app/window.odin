@@ -451,6 +451,9 @@ translate_key :: proc "contextless" (scancode: sdl.Scancode) -> Key {
 	case .F:             return .F
 	case .HOME:          return .Home
 	case .END:           return .End
+	case .D:             return .D
+	case .PAGEUP:        return .Page_Up
+	case .PAGEDOWN:      return .Page_Down
 	case ._1:            return .Digit_1
 	case ._2:            return .Digit_2
 	case ._3:            return .Digit_3
@@ -712,14 +715,41 @@ draw_diff_panel :: proc(
 
 	content := ui.Diff_Content {
 		path      = entity_path(trace, path),
-		mode      = .At_Playhead,
+		mode      = state.diff_mode,
 		status    = resolved.status,
 		gap_event = u64(resolved.gap_event),
 	}
 
-	if replay.has_content(resolved) {
-		content.lines = replay.split_lines(resolved.content, context.temp_allocator)
+	// Without displayable content there is nothing to compare, and the status
+	// already explains why. Showing an empty diff instead would suggest the
+	// file was unchanged rather than unknown.
+	if !replay.has_content(resolved) {
+		ui.draw_diff(&window.list, panel, content)
+		return
 	}
+
+	if state.diff_mode == .At_Playhead {
+		content.lines = replay.split_lines(resolved.content, context.temp_allocator)
+		ui.draw_diff(&window.list, panel, content)
+		return
+	}
+
+	before, available := comparison_baseline(session, state, trace, path)
+	if !available {
+		// A comparison with no earlier state to compare against. Falling back
+		// to the plain view is honest — the content is real — but the mode
+		// label would then claim a comparison that did not happen, so the
+		// panel is told it is showing state alone.
+		content.mode = .At_Playhead
+		content.lines = replay.split_lines(resolved.content, context.temp_allocator)
+		ui.draw_diff(&window.list, panel, content)
+		return
+	}
+	defer delete(before, context.temp_allocator)
+
+	diff := replay.diff_text(before, resolved.content, context.temp_allocator)
+	defer replay.diff_destroy(&diff)
+	content.diff = &diff
 
 	ui.draw_diff(&window.list, panel, content)
 }
@@ -738,6 +768,41 @@ entity_path :: proc(trace: ^codec.Trace, id: model.Entity_Id) -> string {
 		return ""
 	}
 	return name
+}
+
+// comparison_baseline returns the earlier state the selected mode compares to.
+//
+// Each mode names a different moment, and getting one wrong would show a diff
+// against a time the user did not ask about — which reads as a real change
+// that never happened.
+@(private)
+comparison_baseline :: proc(
+	session: ^Replay_Session,
+	state: ^State,
+	trace: ^codec.Trace,
+	path: model.Entity_Id,
+) -> (
+	content: []byte,
+	available: bool,
+) {
+	#partial switch state.diff_mode {
+	case .From_Previous_Mutation:
+		return previous_mutation_content(session, trace, path, context.temp_allocator)
+
+	case .From_Session_Start:
+		return baseline_content(session, path, context.temp_allocator)
+
+	case .Across_Range:
+		// docs/01 sets this range with the bracket keys. Without both ends
+		// there is no range, and guessing one would compare against an
+		// arbitrary moment.
+		if !has_range(state.selection) {
+			return nil, false
+		}
+		from, _ := range_bounds(state.selection)
+		return content_at(session, trace, path, from, context.temp_allocator)
+	}
+	return nil, false
 }
 
 // recover_device attempts one clean reinitialization after device loss.
