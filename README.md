@@ -87,8 +87,8 @@ contains — including record types no adapter can map — without writing outpu
 
 **`open`** launches the desktop application. Arrows step events, Shift steps
 mutations, Command steps outcomes; `[` and `]` set a comparison range; `F`
-focuses a file; `D` cycles the four diff comparisons; `/` searches; Escape backs
-out one layer at a time.
+focuses a file; `D` cycles the four diff comparisons; `/` searches; `W` shows
+the session's import notes; Escape backs out one layer at a time.
 
 **`explain`** is the diagnosis workflow at the terminal: select a failed outcome
 and it prints the ranked evidence behind it, each candidate expanding into the
@@ -180,7 +180,7 @@ would look wrong.
 scripts/norn.sh test
 ```
 
-537 tests across eleven packages, 49 CLI contract checks, and 122 security
+550 tests across eleven packages, 49 CLI contract checks, and 122 security
 checks. The security gate runs every fixture in `tests/fixtures/hostile` through
 the built binary and asserts outcomes rather than mechanisms: no sentinel file
 was created, the repository hash is unchanged, no export leaked a secret or

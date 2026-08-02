@@ -88,10 +88,11 @@ Keyboard controls:
 | Space | Play or pause automatic traversal |
 | `[` / `]` | Set comparison range start or end |
 | `F` | Focus selected entity across panels |
+| `W` | Show or hide the session's import notes |
 | `/` | Open search |
 | `N` / Shift + `N` | Next or previous match, when search is closed |
 | Return / Shift + Return | Next or previous match, while typing |
-| Escape | Close search, then clear focus, then clear range |
+| Escape | Close search or import notes, then clear focus, then clear range |
 
 While the search field has focus it receives every printable key, so `N` and
 `D` type rather than navigate; Return steps matches in their place. Keys that
