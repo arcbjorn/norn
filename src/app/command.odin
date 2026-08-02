@@ -199,6 +199,9 @@ State :: struct {
 	session_start_ns: i64,
 	session_end_ns:   i64,
 
+	// Vertical scroll offset of the inspector, in device pixels.
+	inspector_scroll: f32,
+
 	// Set when the user asked to quit.
 	quitting: bool,
 

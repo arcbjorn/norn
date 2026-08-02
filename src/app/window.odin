@@ -7,6 +7,7 @@ import sdl "vendor:sdl3"
 import "vendor:wgpu"
 import "vendor:wgpu/sdl3glue"
 
+import "src:analysis"
 import "src:core"
 import "src:render"
 import "src:trace/codec"
@@ -55,11 +56,21 @@ Window :: struct {
 }
 
 // TIMELINE_MARGIN is the space reserved around the timeline panel.
-//
-// The other panels docs/01 specifies are not built yet, so the timeline uses
-// the window. The margin keeps it from touching the edges, which makes the
-// unbuilt panels' eventual arrival a layout change rather than a visual shock.
 TIMELINE_MARGIN :: f32(16)
+
+// INSPECTOR_WIDTH is the inspector's width in logical pixels.
+//
+// docs/01 puts the inspector on the right of the workspace. A fixed width
+// rather than a fraction: the panel shows labelled fields, and a proportional
+// column would leave them cramped on a small window and stretched on a large
+// one.
+INSPECTOR_WIDTH :: f32(320)
+
+// MINIMUM_TIMELINE_WIDTH is the width below which the inspector is hidden.
+//
+// A window too narrow for both panels should show the timeline, which is the
+// primary surface. Squeezing both would make neither usable.
+MINIMUM_TIMELINE_WIDTH :: f32(360)
 
 // open creates a window and GPU resources for a trace.
 open :: proc(window: ^Window, title: cstring) -> core.Error {
@@ -183,17 +194,45 @@ update_metrics :: proc(window: ^Window) {
 @(private)
 timeline_bounds :: proc(window: ^Window) -> render.Rect {
 	margin := TIMELINE_MARGIN * window.scale
+	right := window.width - margin
+	if inspector_visible(window) {
+		right = inspector_bounds(window).x0 - margin
+	}
 	return render.Rect {
 		x0 = margin,
 		y0 = margin,
-		x1 = window.width - margin,
+		x1 = right,
 		y1 = window.height - margin,
 	}
+}
+
+// inspector_bounds returns the rectangle the inspector occupies.
+@(private)
+inspector_bounds :: proc(window: ^Window) -> render.Rect {
+	width := INSPECTOR_WIDTH * window.scale
+	return render.Rect {
+		x0 = window.width - width,
+		y0 = 0,
+		x1 = window.width,
+		y1 = window.height,
+	}
+}
+
+// inspector_visible reports whether the window is wide enough for both panels.
+@(private)
+inspector_visible :: proc(window: ^Window) -> bool {
+	needed := (INSPECTOR_WIDTH + MINIMUM_TIMELINE_WIDTH + TIMELINE_MARGIN * 2) * window.scale
+	return window.width >= needed
 }
 
 // run drives the frame loop until the user quits.
 run :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 	index := ui.build_index(trace)
+
+	// The outcome index is derived from immutable trace data, so it is built
+	// once rather than per frame.
+	outcomes := analysis.build_outcome_index(trace)
+	defer analysis.outcome_index_destroy(&outcomes)
 	if !load_fonts(window) {
 		fmt.eprintln("norn: no usable font was found; the timeline will draw without labels")
 	}
@@ -225,7 +264,7 @@ run :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 			continue
 		}
 
-		draw_frame(window, state, trace, index)
+		draw_frame(window, state, trace, index, &outcomes)
 		window.drawn_revision = state.revision
 		window.needs_redraw = false
 	}
@@ -267,6 +306,11 @@ pump_events :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 				apply(state, trace, Command{kind = .Pan, delta = event.wheel.x * 20})
 			}
 
+		case .MOUSE_BUTTON_DOWN:
+			if event.button.button == 1 {
+				select_at_pointer(window, state, trace, event.button.x, event.button.y)
+			}
+
 		case .MOUSE_MOTION:
 			// Dragging with the left button held pans.
 			if .LEFT in event.motion.state {
@@ -278,6 +322,48 @@ pump_events :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 			}
 		}
 	}
+}
+
+// select_at_pointer selects the event under a click.
+//
+// Hit testing runs against the same visible set the frame drew, using the
+// bounds computed there. docs/07 prohibits recomputing this: two formulas
+// drift, and the symptom is a click selecting the neighbour of what the user
+// pointed at.
+@(private)
+select_at_pointer :: proc(
+	window: ^Window,
+	state: ^State,
+	trace: ^codec.Trace,
+	logical_x, logical_y: f32,
+) {
+	bounds := timeline_bounds(window)
+	x := logical_x * window.scale
+	y := logical_y * window.scale
+	if !render.rect_contains(bounds, x, y) {
+		return
+	}
+
+	index := ui.build_index(trace)
+	set := ui.query_visible(trace, index, state.viewport, state.lanes, context.temp_allocator)
+	defer ui.visible_set_destroy(&set)
+
+	lane_height := render.rect_height(bounds) / f32(ui.LANE_COUNT)
+	layout := ui.Lane_Layout {
+		origin_y    = bounds.y0,
+		lane_height = lane_height,
+		padding     = lane_height * 0.15,
+	}
+
+	hit := ui.hit_test(&set, layout, x, y)
+	if hit.found {
+		apply(state, trace, Command{kind = .Select_Event, event = hit.event})
+		return
+	}
+
+	// Clicking empty timeline moves the playhead without changing the
+	// selection, which is how a user scrubs to a moment between events.
+	apply(state, trace, Command{kind = .Set_Playhead, time_ns = ui.x_to_time(state.viewport, x)})
 }
 
 @(private)
@@ -410,6 +496,7 @@ draw_frame :: proc(
 	state: ^State,
 	trace: ^codec.Trace,
 	index: ui.Timeline_Index,
+	outcomes: ^analysis.Outcome_Index,
 ) {
 	// 4. Visible-data query.
 	set := ui.query_visible(trace, index, state.viewport, state.lanes)
@@ -427,10 +514,15 @@ draw_frame :: proc(
 	// cache key includes it, so asking each frame is what keeps text crisp
 	// after such a move.
 	atlas: ^render.Atlas
+	heading: ^render.Atlas
 	if window.fonts_loaded {
 		atlas = render.get_atlas(
 			&window.fonts,
 			render.Atlas_Key{font = .Interface, size = 12, scale = window.scale},
+		)
+		heading = render.get_atlas(
+			&window.fonts,
+			render.Atlas_Key{font = .Interface, size = 15, scale = window.scale},
 		)
 	}
 
@@ -454,12 +546,31 @@ draw_frame :: proc(
 		&set,
 	)
 
+	if inspector_visible(window) {
+		ui.draw_inspector(
+			&window.list,
+			ui.Inspector_State {
+				bounds = inspector_bounds(window),
+				theme = ui.DARK_INSPECTOR,
+				fonts = &window.fonts if window.fonts_loaded else nil,
+				atlas = atlas,
+				heading_atlas = heading,
+				scale = window.scale,
+				selection = state.selection.event,
+				scroll = state.inspector_scroll,
+			},
+			trace,
+			outcomes,
+		)
+	}
+
 	// 7. GPU batching.
 	render.build_batches(&window.list, &window.frame)
 
 	// Glyphs are rasterized lazily during draw-list generation, so the atlas
 	// is uploaded after the panel has run and before anything samples it.
 	render.upload_atlas(&window.backend, atlas)
+	render.upload_atlas(&window.backend, heading)
 
 	// 8. Submit and present.
 	texture := wgpu.SurfaceGetCurrentTexture(window.surface)

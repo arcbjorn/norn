@@ -38,7 +38,8 @@ and native UI are not built yet.
 | WGPU backend (pipelines, instance ring, scissor) | Implemented |
 | Window, frame loop, keyboard navigation | Implemented |
 | Glyph atlas, text layout, lane labels | Implemented |
-| Remaining panels (inspector, diff, repository map) | Not started |
+| Event inspector with evidence stack | Implemented |
+| Remaining panels (diff viewer, repository map) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
 baseline is the importer's job and the importer does not exist yet. A patch
@@ -97,7 +98,8 @@ norn export  <trace.norn> --out <dir> [--range start:end] [--event <id>]
 keyboard navigation from [User experience](docs/01-user-experience.md) — arrows
 step between events, Shift between mutations, Command between outcomes, Space
 plays, brackets set a comparison range, and Escape backs out one layer at a
-time.
+time. Clicking an event opens it in the inspector, which shows its attributes
+and provenance, and for an outcome the ranked evidence behind it.
 
 `explain` is the diagnosis workflow: select a failed outcome and it reports the
 evidence behind it, separated into explicit, reconstructed, and inferred
@@ -127,7 +129,7 @@ src/
   analysis/      outcomes, comparability, scoring, evidence, attempts
   app/           selection, commands, window, frame loop
   render/        draw lists, primitives, batching, fonts, WGPU backend
-  ui/            viewport transforms, virtualization, panels
+  ui/            viewport transforms, virtualization, timeline, inspector
   export/        bundle assembly, HTML report, canonical JSON
 tests/
   core/    arithmetic, path safety, checksum vectors
@@ -182,5 +184,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-287 tests across nine packages. See [Quality](docs/09-quality.md) for the
+299 tests across nine packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
