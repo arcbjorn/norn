@@ -40,6 +40,42 @@ builder_destroy :: proc(builder: ^Builder) {
 	codec.trace_destroy(&builder.trace)
 }
 
+// add_entity_named registers a subject and returns its identifier.
+@(private)
+add_entity_named :: proc(
+	builder: ^Builder,
+	kind: model.Entity_Kind,
+	name: string,
+) -> model.Entity_Id {
+	id := model.Entity_Id(len(builder.trace.entities) + 1)
+	interned, _ := model.string_intern(&builder.trace.strings, name)
+	append(&builder.trace.entities, model.Entity{id = id, kind = kind, name = interned})
+	return id
+}
+
+// add_diagnostic_at records an error diagnostic naming a path and line.
+@(private)
+add_diagnostic_at :: proc(
+	builder: ^Builder,
+	path: model.Entity_Id,
+	line: u32,
+	message: string,
+) -> model.Event_Id {
+	interned, _ := model.string_intern(&builder.trace.strings, message)
+	payload := model.add_diagnostic(
+		&builder.trace.payloads,
+		model.Diagnostic_Payload {
+			severity = .Error,
+			path = path,
+			line = line,
+			message = interned,
+		},
+	)
+	id := add(builder, .Diagnostic, builder.clock, primary = path)
+	builder.trace.events[len(builder.trace.events) - 1].payload = payload
+	return id
+}
+
 // add adds an event at an explicit time.
 @(private)
 add :: proc(
@@ -47,6 +83,7 @@ add :: proc(
 	kind: model.Event_Kind,
 	time_ns: i64,
 	duration_ns: i64 = 0,
+	primary: model.Entity_Id = model.NO_ENTITY,
 ) -> model.Event_Id {
 	id := builder.next
 	builder.next += 1
@@ -65,9 +102,11 @@ add :: proc(
 			flags = flags,
 			wall_time_ns = time_ns,
 			duration_ns = duration_ns,
+			primary_entity_id = primary,
 		},
 	)
 	builder.sequence += 1
+	builder.clock = time_ns
 	return id
 }
 
