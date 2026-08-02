@@ -37,6 +37,8 @@ main :: proc() {
 		os.exit(command_inspect(rest))
 	case "validate":
 		os.exit(command_validate(rest))
+	case "open":
+		os.exit(command_open(rest))
 	case "explain":
 		os.exit(command_explain(rest))
 	case "export":
@@ -58,6 +60,7 @@ print_usage :: proc(to_stderr: bool) {
 	usage := `Norn - time-travel debugger for coding-agent sessions
 
 Usage:
+  norn open <trace.norn>
   norn inspect <trace.norn> [--json]
   norn validate <trace.norn> [--mode quick|full|replay]
   norn explain <trace.norn> --event <id>
@@ -70,7 +73,6 @@ Prompt text and command output are excluded unless --include-messages or
 --include-output is given.
 
 Commands not yet implemented in this build:
-  norn open <trace.norn>
   norn import <source> --repo <path> [--format codex] [--out file.norn]
 
 Exit codes:

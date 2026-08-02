@@ -36,7 +36,8 @@ and native UI are not built yet.
 | Timeline viewport, virtualization, hit testing | Implemented |
 | Draw lists, batching, timeline panel | Implemented |
 | WGPU backend (pipelines, instance ring, scissor) | Implemented |
-| Native UI (window, application loop, other panels) | Not started |
+| Window, frame loop, keyboard navigation | Implemented |
+| Remaining panels (inspector, diff, repository map) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
 baseline is the importer's job and the importer does not exist yet. A patch
@@ -83,12 +84,19 @@ scripts/norn.sh clean
 The product CLI:
 
 ```sh
+norn open    <trace.norn>
 norn inspect <trace.norn> [--json]
 norn validate <trace.norn> [--mode quick|full|replay]
 norn explain <trace.norn> --list
 norn explain <trace.norn> --event <id>
 norn export  <trace.norn> --out <dir> [--range start:end] [--event <id>]
 ```
+
+`open` launches the desktop application: a virtualized timeline with the
+keyboard navigation from [User experience](docs/01-user-experience.md) — arrows
+step between events, Shift between mutations, Command between outcomes, Space
+plays, brackets set a comparison range, and Escape backs out one layer at a
+time.
 
 `explain` is the diagnosis workflow: select a failed outcome and it reports the
 evidence behind it, separated into explicit, reconstructed, and inferred
@@ -116,6 +124,7 @@ src/
     codec/       .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison
   analysis/      outcomes, comparability, scoring, evidence, attempts
+  app/           selection, commands, window, frame loop
   render/        draw lists, primitives, batching, WGPU backend
   ui/            viewport transforms, virtualization, panels
   export/        bundle assembly, HTML report, canonical JSON
@@ -128,6 +137,7 @@ tests/
   export/  encoding, injection resistance, and determinism
   render/  draw list culling, clipping, batching, instance layout
   ui/      transform inverses, virtualization, and drawn output
+  app/     command routing, keyboard bindings, and playback
 spike/    throwaway phase-zero validation programs
 scripts/  repeatable developer commands
 ```
@@ -171,5 +181,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-247 tests across eight packages. See [Quality](docs/09-quality.md) for the
+272 tests across nine packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
