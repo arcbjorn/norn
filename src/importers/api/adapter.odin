@@ -104,6 +104,10 @@ Options :: struct {
 	literal_rules: []string,
 	// The home directory to replace with a stable placeholder.
 	home_prefix: string,
+	// The repository to read baseline content from. Nil skips capture, which
+	// docs/06 treats as a legitimate state: the trace records that it has no
+	// baseline rather than implying one.
+	repository: ^Repository,
 }
 
 // Importer is the adapter interface.

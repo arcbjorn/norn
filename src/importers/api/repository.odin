@@ -322,3 +322,115 @@ to_identity :: proc(repository: ^Repository) -> Session_Identity {
 	}
 	return identity
 }
+
+// read_working_tree_file reads a repository-relative file from disk.
+//
+// docs/08: "when reading a repository baseline, resolve each path beneath an
+// already-opened repository root and verify the final target remains within
+// it." The relative path is validated before it is joined, and the joined
+// result is checked again — a symlink inside the repository could otherwise
+// point anywhere, and validating only the input string would not catch it.
+//
+// docs/08 also states import never follows a repository symlink by default.
+read_working_tree_file :: proc(
+	root: string,
+	path: string,
+	allocator := context.allocator,
+) -> (
+	content: []byte,
+	ok: bool,
+) {
+	full, joined := resolve_within_root(root, path)
+	if !joined {
+		return nil, false
+	}
+	defer delete(full, context.temp_allocator)
+
+	data, err := os.read_entire_file_from_path(full, allocator)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// Presence is what an existence probe can conclude about a path.
+//
+// Three outcomes, not two. docs/06 forbids conflating "absent" with "not
+// observed", and a path refused at the repository boundary is the second: a
+// symlink pointing outside the repository is not read, but the file is plainly
+// there, and recording it as absent would let replay assert it did not exist.
+Presence :: enum u8 {
+	Absent,
+	Present,
+	// Refused by the boundary check, or unreadable. Nothing was observed.
+	Unknown,
+}
+
+// working_tree_presence reports whether a path is present in the repository.
+//
+// Separate from reading, because "absent" and "unreadable" are different
+// observations and docs/06 forbids conflating them.
+working_tree_presence :: proc(root: string, path: string) -> Presence {
+	full, joined := resolve_within_root(root, path)
+	if !joined {
+		// The boundary refused it. Whether a file is there is not something
+		// this is allowed to find out, so it reports that it does not know.
+		return .Unknown
+	}
+	defer delete(full, context.temp_allocator)
+
+	if os.is_file(full) {
+		// Readable and inside the repository, but the read failed — a
+		// permission problem, or a race with something else writing.
+		return .Present
+	}
+	if os.exists(full) {
+		// A directory, or a device. Present, but not a file whose content a
+		// baseline could record.
+		return .Present
+	}
+	return .Absent
+}
+
+// resolve_within_root joins a relative path to the root and confirms the result
+// stays inside it.
+//
+// The containment check is on the *resolved* path, so a symlink that escapes
+// the repository is refused even though the recorded path looked ordinary.
+@(private)
+resolve_within_root :: proc(root: string, path: string) -> (full: string, ok: bool) {
+	if !is_safe_relative_path(path) {
+		return "", false
+	}
+
+	joined := strings.concatenate({root, "/", path}, context.temp_allocator)
+
+	// os.get_absolute_path resolves symlinks and `..`, so comparing its output
+	// to the resolved root is what actually enforces the boundary.
+	resolved, resolve_err := os.get_absolute_path(joined, context.temp_allocator)
+	if resolve_err != nil {
+		// A path that does not exist cannot be resolved. That is not an escape,
+		// so the caller still gets the joined path and finds out by reading.
+		return joined, true
+	}
+
+	root_resolved, root_err := os.get_absolute_path(root, context.temp_allocator)
+	if root_err != nil {
+		delete(resolved, context.temp_allocator)
+		return "", false
+	}
+	defer delete(root_resolved, context.temp_allocator)
+
+	// The separator matters: "/repo-other" must not pass a prefix test against
+	// "/repo".
+	prefix := strings.concatenate({root_resolved, "/"}, context.temp_allocator)
+	defer delete(prefix, context.temp_allocator)
+
+	if !strings.has_prefix(resolved, prefix) {
+		delete(resolved, context.temp_allocator)
+		return "", false
+	}
+
+	delete(joined, context.temp_allocator)
+	return resolved, true
+}

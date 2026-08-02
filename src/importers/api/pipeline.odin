@@ -36,6 +36,12 @@ Import_Outcome :: struct {
 	// Bytes the source occupied, for context alongside the trace size.
 	source_bytes: u64,
 	trace_bytes:  u64,
+
+	// Baseline capture counts. docs/06 distinguishes observed-absent from
+	// not-observed, so these are reported separately rather than as one number.
+	baseline_captured: int,
+	baseline_absent:   int,
+	baseline_skipped:  int,
 }
 
 // import_source runs the pipeline for one adapter and source.
@@ -90,8 +96,26 @@ import_source :: proc(
 		return {}, invariant_err
 	}
 
+	// Baseline capture runs after the adapter, when the set of paths a session
+	// touched is known. Reading the repository up front would mean guessing
+	// which files matter; reading it during replay would mean touching the
+	// filesystem long after import, which docs/08 forbids.
+	capture: Baseline_Capture
+	baseline_capture_init(&capture, .None, allocator)
+	defer baseline_capture_destroy(&capture)
+
+	if options.repository != nil {
+		capture_baseline(&capture, &sink, options.repository, options)
+	}
+
 	metadata := build_metadata(&sink, identity)
+	metadata.baseline_kind = capture.kind
 	content := finish(&sink, new_session_id(), metadata)
+	content.baseline = capture.entries[:]
+
+	outcome.baseline_captured = capture.captured
+	outcome.baseline_absent = capture.absent
+	outcome.baseline_skipped = capture.skipped
 
 	// Writing, full validation, and atomic publish are the codec's: write_trace
 	// writes a temporary file, reopens it, validates, and renames only on
@@ -167,9 +191,9 @@ build_metadata :: proc(sink: ^Sink, identity: Session_Identity) -> codec.Session
 		}
 	}
 
-	// docs/06: a working-tree snapshot is acceptable but labelled
-	// observational. Without a captured baseline there is nothing to label, so
-	// the trace says so rather than implying a verified one.
+	// The caller overrides this after baseline capture. Defaulting to None here
+	// means a trace whose capture found nothing says so, rather than implying a
+	// verified baseline it does not have.
 	metadata.baseline_kind = .None
 
 	return metadata
