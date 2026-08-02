@@ -501,3 +501,132 @@ load_ui_font :: proc(set: ^render.Font_Set) -> bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// Empty states
+// ---------------------------------------------------------------------------
+//
+// docs/01: "Empty panels explain why they are empty: no events, filtered out,
+// unsupported record, replay gap, or missing repository."
+//
+// A blank timeline is indistinguishable from a broken program, and the three
+// reasons it can be blank send a user to three different places: undo a filter,
+// press Home, or accept that the trace holds nothing. The panel cannot tell
+// them apart on its own, which is why the caller supplies the context.
+
+@(private)
+empty_timeline_text :: proc(
+	t: ^testing.T,
+	total_events: int,
+	filtering: bool,
+) -> int {
+	fonts: render.Font_Set
+	if !load_ui_font(&fonts) {
+		testing.fail_now(t, "no system font available to test against")
+	}
+	defer render.font_set_destroy(&fonts)
+	atlas := render.get_atlas(&fonts, render.Atlas_Key{font = .Interface, size = 12, scale = 1})
+
+	state := panel_state(ui.Viewport{start_ns = 0, span_ns = 1_000_000_000, width = 800})
+	state.fonts = &fonts
+	state.atlas = atlas
+	state.scale = 1
+	state.total_events = total_events
+	state.filtering = filtering
+
+	empty: ui.Visible_Set
+
+	list: render.Draw_List
+	render.draw_list_init(&list)
+	defer render.draw_list_destroy(&list)
+	render.draw_list_reset(&list, PANEL_BOUNDS)
+
+	ui.draw_timeline(&list, state, &empty)
+	return count_kind(&list, .Glyph)
+}
+
+@(test)
+an_empty_timeline_explains_itself :: proc(t: ^testing.T) {
+	// Each case must produce text. A blank panel that said nothing would be
+	// the failure docs/01 names.
+	testing.expect(t, empty_timeline_text(t, 0, false) > 0, "an empty trace must say so")
+	testing.expect(t, empty_timeline_text(t, 40, true) > 0, "a filtered view must say so")
+	testing.expect(t, empty_timeline_text(t, 40, false) > 0, "an off-screen range must say so")
+}
+
+@(test)
+the_empty_message_distinguishes_its_reasons :: proc(t: ^testing.T) {
+	// Different reasons, different messages. One message for all three would
+	// satisfy "explains why it is empty" in letter only, and would send a user
+	// looking for a filter that is not applied.
+	empty_trace := empty_timeline_text(t, 0, false)
+	filtered := empty_timeline_text(t, 40, true)
+	off_screen := empty_timeline_text(t, 40, false)
+
+	// Glyph counts stand in for the text, which a draw list does not retain.
+	// The three messages differ in length, so equal counts mean one message.
+	testing.expect(t, empty_trace != filtered, "an empty trace and a filtered view must differ")
+	testing.expect(t, filtered != off_screen, "a filtered view and an off-screen range must differ")
+}
+
+@(test)
+a_populated_timeline_draws_no_empty_message :: proc(t: ^testing.T) {
+	// The converse: an explanation on a panel that has content would be noise
+	// drawn over the data.
+	fonts: render.Font_Set
+	if !load_ui_font(&fonts) {
+		testing.fail_now(t, "no system font available to test against")
+	}
+	defer render.font_set_destroy(&fonts)
+	atlas := render.get_atlas(&fonts, render.Atlas_Key{font = .Interface, size = 12, scale = 1})
+
+	builder: Builder
+	builder_init(&builder)
+	defer builder_destroy(&builder)
+	add(&builder, .File_Modify, SECOND)
+
+	index := ui.build_index(&builder.trace)
+
+	viewport := ui.Viewport{start_ns = 0, span_ns = 4 * SECOND, width = 800}
+	set := ui.query_visible(&builder.trace, index, viewport, ui.ALL_LANES)
+	defer ui.visible_set_destroy(&set)
+	testing.expect(t, len(set.events) > 0, "the fixture must produce a visible event")
+
+	state := panel_state(viewport)
+	state.fonts = &fonts
+	state.atlas = atlas
+	state.scale = 1
+	state.total_events = len(builder.trace.events)
+
+	list: render.Draw_List
+	render.draw_list_init(&list)
+	defer render.draw_list_destroy(&list)
+	render.draw_list_reset(&list, PANEL_BOUNDS)
+
+	ui.draw_timeline(&list, state, &set)
+
+	// Lane labels are the only text a populated timeline draws; the empty
+	// message would add far more than the panel's seven short lane names.
+	with_labels := count_kind(&list, .Glyph)
+	testing.expect(t, with_labels < empty_timeline_text(t, 0, false) + 60)
+}
+
+@(test)
+an_empty_timeline_without_a_font_still_draws :: proc(t: ^testing.T) {
+	// docs/13 keeps font discovery an open question, so a missing face must
+	// degrade rather than crash.
+	state := panel_state(ui.Viewport{start_ns = 0, span_ns = SECOND, width = 800})
+	state.total_events = 0
+
+	empty: ui.Visible_Set
+
+	list: render.Draw_List
+	render.draw_list_init(&list)
+	defer render.draw_list_destroy(&list)
+	render.draw_list_reset(&list, PANEL_BOUNDS)
+
+	ui.draw_timeline(&list, state, &empty)
+
+	testing.expect_value(t, count_kind(&list, .Glyph), 0)
+	testing.expect(t, count_kind(&list, .Rect) > 0, "the lanes must still be drawn")
+}

@@ -763,6 +763,11 @@ draw_frame :: proc(
 			selection = state.selection.event,
 			playhead_ns = state.selection.playhead_ns,
 			has_playhead = state.selection.has_playhead,
+			scale = window.scale,
+			// docs/01 requires an empty panel to say why. Only the caller knows
+			// whether the view was narrowed or the trace is simply empty.
+			total_events = len(trace.events),
+			filtering = state.lanes != ui.ALL_LANES || search_active(state),
 		},
 		&set,
 	)

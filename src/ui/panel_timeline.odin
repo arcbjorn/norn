@@ -106,6 +106,17 @@ Panel_State :: struct {
 	playhead_ns: i64,
 	// Whether the playhead is set at all; a session opens with no time chosen.
 	has_playhead: bool,
+
+	// Why the panel might be empty. docs/01: "empty panels explain why they are
+	// empty: no events, filtered out, unsupported record, replay gap, or
+	// missing repository." The panel can see that its visible set is empty but
+	// not why, and the difference is what the user needs: a filtered view has
+	// something to undo, an empty trace does not.
+	total_events: int,
+	// True when a lane filter, a search, or both are narrowing what is shown.
+	filtering: bool,
+	// Scale, for text placed in the empty state.
+	scale: f32,
 }
 
 // FAILURE_MARKER_HEIGHT is the height of the tick drawn above a failure.
@@ -127,9 +138,57 @@ draw_timeline :: proc(
 	defer render.pop_clip(list, previous_clip)
 
 	draw_lane_backgrounds(list, state)
+
+	if len(set.events) == 0 {
+		draw_empty_state(list, state)
+		// The playhead still draws: it is a property of the selection rather
+		// than of the events, and hiding it would make an empty view look
+		// like a different moment.
+		draw_playhead(list, state)
+		return
+	}
+
 	draw_events(list, state, set)
 	draw_selection(list, state, set)
 	draw_playhead(list, state)
+}
+
+// draw_empty_state says why the timeline has nothing to show.
+//
+// docs/01 lists the reasons a panel can be empty and requires it to name one.
+// The distinction that matters here is between a view the user narrowed and a
+// trace that holds nothing: the first has something to undo, and a blank panel
+// that did not say so reads as a broken program.
+@(private)
+draw_empty_state :: proc(list: ^render.Draw_List, state: Panel_State) {
+	if state.fonts == nil || state.atlas == nil {
+		return
+	}
+
+	message: string
+	switch {
+	case state.total_events == 0:
+		message = "This session recorded no events."
+	case state.filtering:
+		message = "No events match the current filters."
+	case:
+		// Events exist and nothing is filtered, so the viewport is simply
+		// somewhere the session is not. Naming the remedy beats naming the
+		// state, because the state is not what the user wants to know.
+		message = "No events in this time range. Press Home to fit the session."
+	}
+
+	scale := state.scale if state.scale > 0 else 1
+	render.draw_text_clipped(
+		list,
+		state.fonts,
+		state.atlas,
+		message,
+		state.bounds.x0 + 16 * scale,
+		state.bounds.y0 + 16 * scale,
+		render.rect_width(state.bounds) - 32 * scale,
+		state.theme.lane_label,
+	)
 }
 
 @(private)
