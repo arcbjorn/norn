@@ -38,6 +38,7 @@ requirement in the adapter contract and generates the fixture tiers.
 | `norn inspect` / `validate` / `explain` / `export` | Implemented |
 | Importer contract, record sink, redaction | Implemented |
 | Import pipeline and repository identity capture | Implemented |
+| Repository baseline capture and replay | Implemented |
 | NSL adapter and deterministic fixture generator | Implemented |
 | `norn import` | Implemented |
 | Codex adapter (needs real sample traces) | Not started |
@@ -57,11 +58,19 @@ requirement in the adapter contract and generates the fixture tiers.
 | Hostile fixture suite and security gate | Implemented |
 | Replay seek benchmark | Implemented |
 
-Replay starts from an empty baseline: the importer records repository identity
-but does not yet capture baseline file content. A patch against a file replay
-has never seen is therefore a `missing_baseline` gap — the honest result for a
-trace that carries no baseline. A mutation that records its own before and after
-content replays and verifies normally, which is what the fixtures exercise.
+Import captures a repository baseline: the starting content of every path the
+session touched, read from the recorded commit with `git show` when the tree is
+clean and from the working tree otherwise, and labelled `commit_verified` or
+`working_tree_observational` accordingly. A patch against a file that existed
+before the session therefore reconstructs, where it used to be a
+`missing_baseline` gap.
+
+The manifest records only what was actually observed. docs/06 forbids implying
+that unobserved paths were absent, so three outcomes stay distinct: content was
+read, absence was observed, or nothing was observed. A path refused at the
+repository boundary — a symlink pointing outside it, say — falls in the third
+group and produces no entry at all, because claiming absence for a file that
+plainly exists would be a false observation.
 
 ## Requirements
 
@@ -225,7 +234,7 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-466 tests across eleven packages, plus 45 CLI contract checks and 122 security
+476 tests across eleven packages, plus 49 CLI contract checks and 122 security
 checks against the hostile fixtures. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
 

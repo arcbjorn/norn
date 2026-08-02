@@ -182,6 +182,26 @@ force the entire trace to be rewritten.
 **Consequence:** Moving a trace requires moving or exporting its overlay when
 annotations matter. Missing overlays do not affect trace validity.
 
+## 015: baseline absence is an observation, not a default
+
+**Decision:** The baseline manifest records three distinct outcomes per path —
+content was read, absence was observed, or nothing was observed. A path Norn
+could not read produces no manifest entry at all rather than an entry claiming
+absence.
+
+**Reason:** docs/06 requires that the manifest "must not imply that unobserved
+paths were absent." The two collapse easily in code, because both arrive as a
+failed read. But they are different claims to the user: observed absence lets
+replay treat a later create as legitimate, while an unread path is a gap. A
+symlink pointing outside the repository is the sharp case — the boundary check
+refuses it, and recording that as absence would assert a file did not exist when
+it plainly does.
+
+**Consequence:** The existence probe returns three states rather than a boolean,
+and binary files — deliberately not stored — produce no entry either, because
+the schema cannot express "present, content intentionally omitted". Those paths
+replay as gaps, which is the honest outcome for content Norn chose not to keep.
+
 ## Open questions
 
 These require spikes or user evidence rather than immediate decisions:
