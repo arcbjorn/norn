@@ -173,6 +173,38 @@ main() {
 		failed=1
 	fi
 
+	# docs/11: "identical input produces identical canonical-content digests."
+	# The codec tests assert this on a hand-built image; this asserts it through
+	# a real import, where a stray clock read or an environment-dependent path
+	# would show up and a unit test would not see it.
+	{
+		echo '{"type":"session","nsl_version":1,"started_at":2000}'
+		echo '{"type":"message","t":2100,"role":"user","text":"deterministic?"}'
+		echo '{"type":"file","t":2200,"op":"create","path":"b.odin","after":"one\n"}'
+		echo '{"type":"command","t":2300,"command":"odin check","exit":0}'
+	} >"${scratch}/det.jsonl"
+
+	mkdir -p "${scratch}/da" "${scratch}/db"
+	"${NORN}" import "${scratch}/det.jsonl" --repo "${ROOT}" \
+		--out "${scratch}/da/t.norn" >/dev/null 2>&1
+	"${NORN}" import "${scratch}/det.jsonl" --repo "${ROOT}" \
+		--out "${scratch}/db/t.norn" >/dev/null 2>&1
+
+	# Only the session identity and creation time may differ, and both live in
+	# the 64-byte file header. Every chunk byte after it must match.
+	checks=$((checks + 1))
+	if ! cmp -s -i 64 "${scratch}/da/t.norn" "${scratch}/db/t.norn"; then
+		echo "FAIL: two imports of one source produced different chunk bytes"
+		failed=1
+	fi
+
+	# And the headers really did differ, or the check above proves nothing.
+	checks=$((checks + 1))
+	if cmp -s "${scratch}/da/t.norn" "${scratch}/db/t.norn"; then
+		echo "FAIL: two imports produced an identical session identity"
+		failed=1
+	fi
+
 	# --dry-run reports what a source contains without writing output.
 	local dry="${scratch}/dry.jsonl"
 	{
