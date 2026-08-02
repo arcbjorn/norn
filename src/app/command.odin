@@ -201,6 +201,8 @@ State :: struct {
 
 	// Vertical scroll offset of the inspector, in device pixels.
 	inspector_scroll: f32,
+	// Vertical scroll of the diff panel, in lines.
+	diff_scroll_lines: int,
 
 	// Set when the user asked to quit.
 	quitting: bool,

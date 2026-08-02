@@ -39,7 +39,9 @@ and native UI are not built yet.
 | Window, frame loop, keyboard navigation | Implemented |
 | Glyph atlas, text layout, lane labels | Implemented |
 | Event inspector with evidence stack | Implemented |
-| Remaining panels (diff viewer, repository map) | Not started |
+| Line diffing and the diff viewer panel | Implemented |
+| Repository map panel | Not started |
+| Replay driven from the playhead | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
 baseline is the importer's job and the importer does not exist yet. A patch
@@ -125,17 +127,17 @@ src/
   trace/
     model/       canonical semantic types, interning, blobs
     codec/       .norn reader, writer, and validator
-  replay/        virtual repository, patching, seeking, comparison
+  replay/        virtual repository, patching, seeking, comparison, diffing
   analysis/      outcomes, comparability, scoring, evidence, attempts
   app/           selection, commands, window, frame loop
   render/        draw lists, primitives, batching, fonts, WGPU backend
-  ui/            viewport transforms, virtualization, timeline, inspector
+  ui/            viewport transforms, virtualization, timeline, inspector, diff
   export/        bundle assembly, HTML report, canonical JSON
 tests/
   core/    arithmetic, path safety, checksum vectors
   model/   interning and blob identity
   codec/   roundtrip, determinism, and corruption fixtures
-  replay/  patching, mutation chains, and seek properties
+  replay/  patching, mutation chains, seek properties, diff reconstruction
   analysis/ comparability, scoring weights, and evidence ordering
   export/  encoding, injection resistance, and determinism
   render/  draw list culling, clipping, batching, glyph atlases
@@ -184,5 +186,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-299 tests across nine packages. See [Quality](docs/09-quality.md) for the
+324 tests across nine packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.

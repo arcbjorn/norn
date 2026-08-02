@@ -11,6 +11,7 @@ import "src:analysis"
 import "src:core"
 import "src:render"
 import "src:trace/codec"
+import "src:trace/model"
 import "src:ui"
 
 // The window and frame loop.
@@ -43,6 +44,9 @@ Window :: struct {
 	// rather than preventing the window from opening.
 	fonts:        render.Font_Set,
 	fonts_loaded: bool,
+	// The monospace atlas, held because the diff panel needs it every frame
+	// and the scale can change between them.
+	mono_atlas: ^render.Atlas,
 
 	// Framebuffer size in pixels and the display scale that produced it.
 	width, height: f32,
@@ -65,6 +69,16 @@ TIMELINE_MARGIN :: f32(16)
 // column would leave them cramped on a small window and stretched on a large
 // one.
 INSPECTOR_WIDTH :: f32(320)
+
+// DIFF_HEIGHT_FRACTION is how much of the window the diff panel occupies.
+//
+// docs/01 puts it along the bottom, spanning the workspace. A fraction rather
+// than a fixed height because its content is many short lines: more window
+// means more lines visible, which is the useful direction to scale.
+DIFF_HEIGHT_FRACTION :: f32(0.38)
+
+// MINIMUM_DIFF_HEIGHT is the height below which the diff panel is hidden.
+MINIMUM_DIFF_HEIGHT :: f32(120)
 
 // MINIMUM_TIMELINE_WIDTH is the width below which the inspector is hidden.
 //
@@ -198,12 +212,33 @@ timeline_bounds :: proc(window: ^Window) -> render.Rect {
 	if inspector_visible(window) {
 		right = inspector_bounds(window).x0 - margin
 	}
-	return render.Rect {
-		x0 = margin,
-		y0 = margin,
-		x1 = right,
-		y1 = window.height - margin,
+	bottom := window.height - margin
+	if diff_visible(window) {
+		bottom = diff_bounds(window).y0 - margin
 	}
+	return render.Rect{x0 = margin, y0 = margin, x1 = right, y1 = bottom}
+}
+
+// diff_bounds returns the rectangle the diff panel occupies.
+//
+// It spans the full window width rather than stopping at the inspector: a diff
+// is read line by line, and the extra width is worth more here than a clean
+// column edge.
+@(private)
+diff_bounds :: proc(window: ^Window) -> render.Rect {
+	height := window.height * DIFF_HEIGHT_FRACTION
+	return render.Rect {
+		x0 = 0,
+		y0 = window.height - height,
+		x1 = window.width,
+		y1 = window.height,
+	}
+}
+
+// diff_visible reports whether the window is tall enough for the diff panel.
+@(private)
+diff_visible :: proc(window: ^Window) -> bool {
+	return window.height * DIFF_HEIGHT_FRACTION >= MINIMUM_DIFF_HEIGHT * window.scale
 }
 
 // inspector_bounds returns the rectangle the inspector occupies.
@@ -524,6 +559,10 @@ draw_frame :: proc(
 			&window.fonts,
 			render.Atlas_Key{font = .Interface, size = 15, scale = window.scale},
 		)
+		window.mono_atlas = render.get_atlas(
+			&window.fonts,
+			render.Atlas_Key{font = .Monospace, size = 12, scale = window.scale},
+		)
 	}
 
 	ui.draw_timeline(
@@ -564,6 +603,10 @@ draw_frame :: proc(
 		)
 	}
 
+	if diff_visible(window) {
+		draw_diff_panel(window, state, trace, atlas, heading)
+	}
+
 	// 7. GPU batching.
 	render.build_batches(&window.list, &window.frame)
 
@@ -571,6 +614,7 @@ draw_frame :: proc(
 	// is uploaded after the panel has run and before anything samples it.
 	render.upload_atlas(&window.backend, atlas)
 	render.upload_atlas(&window.backend, heading)
+	render.upload_atlas(&window.backend, window.mono_atlas)
 
 	// 8. Submit and present.
 	texture := wgpu.SurfaceGetCurrentTexture(window.surface)
@@ -610,6 +654,66 @@ draw_frame :: proc(
 		ui.DARK_THEME.background,
 	)
 	wgpu.SurfacePresent(window.surface)
+}
+
+// draw_diff_panel renders the file content for the focused path.
+//
+// The panel shows the state the replay engine produced and nothing else. When
+// no file is focused it says so rather than guessing at one, because picking a
+// file the user did not select would present arbitrary content as the subject
+// of their investigation.
+@(private)
+draw_diff_panel :: proc(
+	window: ^Window,
+	state: ^State,
+	trace: ^codec.Trace,
+	atlas: ^render.Atlas,
+	heading: ^render.Atlas,
+) {
+	bounds := diff_bounds(window)
+	panel := ui.Diff_Panel_State {
+		bounds  = bounds,
+		theme   = ui.DARK_DIFF,
+		fonts   = &window.fonts if window.fonts_loaded else nil,
+		mono    = window.mono_atlas,
+		heading = heading,
+		scale   = window.scale,
+		scroll_lines = state.diff_scroll_lines,
+	}
+
+	content := ui.Diff_Content {
+		mode   = .At_Playhead,
+		status = .Unknown_Path,
+	}
+
+	if state.selection.focus_kind == .Entity {
+		content.path = entity_path(trace, state.selection.focus_entity)
+
+		// Replay is not yet driven by the playhead in the frame loop; until it
+		// is, the panel reports that it has nothing rather than showing stale
+		// or invented content. docs/01 forbids filling a gap with a
+		// substitution that is not labelled, and an unlabelled guess here
+		// would be exactly that.
+		content.status = .Unknown_Path
+	}
+
+	ui.draw_diff(&window.list, panel, content)
+}
+
+@(private)
+entity_path :: proc(trace: ^codec.Trace, id: model.Entity_Id) -> string {
+	if id == model.NO_ENTITY {
+		return ""
+	}
+	index := int(id) - 1
+	if index < 0 || index >= len(trace.entities) {
+		return ""
+	}
+	name, ok := model.string_get(&trace.strings, trace.entities[index].name)
+	if !ok {
+		return ""
+	}
+	return name
 }
 
 // recover_device attempts one clean reinitialization after device loss.
