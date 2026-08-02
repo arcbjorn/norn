@@ -521,3 +521,34 @@ Case folding is ASCII-only. A full Unicode fold needs a table and per-rune
 decoding, and the fields being searched are paths, identifiers, and command
 lines; non-ASCII text still matches exactly, it is simply not case-insensitive
 beyond ASCII.
+
+## A test that proved nothing
+
+The search bar draws filter chips whose rectangles are also their click
+targets — the case docs/07 has in mind when it prohibits duplicate coordinate
+math. The obvious test reads:
+
+```odin
+for chip in layout.chips {
+    centre := midpoint(chip.bounds)
+    hit, found := chip_at(&layout, centre.x, centre.y)
+    expect(found)
+}
+```
+
+It passes. It also passes when the recorded rectangles are shifted four pixels
+away from where the chips were drawn, which is exactly the bug it was written to
+catch: probing a rectangle's own centre proves only that the rectangle contains
+its centre. Both sides of the comparison came from the same source.
+
+The fix was to read the chip rectangles back out of the draw list — what the
+renderer will actually put on screen — and hit test against those. That version
+fails the same mutation with the coordinates named:
+
+```
+chip 0 was drawn at Rect{x0 = 373.24, ...} but recorded at Rect{x0 = 377.24, ...}
+```
+
+Worth stating generally: a test whose expectation and subject derive from one
+value tests that value against itself. The independent source here was the draw
+list, because it is the artifact the property is actually about.
