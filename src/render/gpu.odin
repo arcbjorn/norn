@@ -233,8 +233,12 @@ Backend :: struct {
 	ring:  [FRAMES_IN_FLIGHT]Ring_Buffer,
 	slot:  int,
 
-	// Atlas bind groups by atlas identifier.
-	atlas_groups: map[u32]wgpu.BindGroup,
+	// Atlas resources by atlas identifier. Textures and views are held
+	// alongside the bind groups so an atlas that gains a glyph can be
+	// re-uploaded without recreating its binding.
+	atlas_groups:   map[u32]wgpu.BindGroup,
+	atlas_textures: map[u32]wgpu.Texture,
+	atlas_views:    map[u32]wgpu.TextureView,
 
 	// Scratch for converting commands to instances, reused each frame.
 	instances: [dynamic]Instance,
@@ -258,6 +262,8 @@ backend_init :: proc(
 	backend.queue = queue
 	backend.format = format
 	backend.atlas_groups = make(map[u32]wgpu.BindGroup, 8, allocator)
+	backend.atlas_textures = make(map[u32]wgpu.Texture, 8, allocator)
+	backend.atlas_views = make(map[u32]wgpu.TextureView, 8, allocator)
 	backend.instances = make([dynamic]Instance, 0, 4096, allocator)
 
 	backend.uniform_buffer = wgpu.DeviceCreateBuffer(
@@ -468,6 +474,48 @@ grow_ring_slot :: proc(backend: ^Backend, slot: int, capacity: int) {
 		},
 	)
 	backend.ring[slot].capacity = capacity
+}
+
+// upload_atlas uploads a glyph atlas and registers it for glyph batches.
+//
+// Idempotent: an atlas whose pixels have not changed since its last upload is
+// skipped, so calling this every frame costs a boolean test. That is the
+// intended usage, because a glyph rasterized lazily mid-frame invalidates the
+// texture and the next frame must re-upload without the caller tracking which.
+upload_atlas :: proc(backend: ^Backend, atlas: ^Atlas) {
+	if atlas == nil || atlas.uploaded {
+		return
+	}
+
+	texture, exists := backend.atlas_textures[atlas.id]
+	if !exists {
+		texture = wgpu.DeviceCreateTexture(
+			backend.device,
+			&wgpu.TextureDescriptor {
+				usage = {.TextureBinding, .CopyDst},
+				dimension = ._2D,
+				size = {ATLAS_SIZE, ATLAS_SIZE, 1},
+				format = .R8Unorm,
+				mipLevelCount = 1,
+				sampleCount = 1,
+			},
+		)
+		backend.atlas_textures[atlas.id] = texture
+
+		view := wgpu.TextureCreateView(texture, nil)
+		backend.atlas_views[atlas.id] = view
+		register_atlas(backend, atlas.id, view)
+	}
+
+	wgpu.QueueWriteTexture(
+		backend.queue,
+		&wgpu.TexelCopyTextureInfo{texture = texture, mipLevel = 0, aspect = .All},
+		raw_data(atlas.pixels),
+		uint(len(atlas.pixels)),
+		&wgpu.TexelCopyBufferLayout{bytesPerRow = ATLAS_SIZE, rowsPerImage = ATLAS_SIZE},
+		&wgpu.Extent3D{ATLAS_SIZE, ATLAS_SIZE, 1},
+	)
+	atlas.uploaded = true
 }
 
 // register_atlas makes a texture available to glyph batches.
@@ -691,6 +739,14 @@ backend_release_gpu :: proc(backend: ^Backend) {
 		wgpu.BindGroupRelease(group)
 	}
 	clear(&backend.atlas_groups)
+	for _, view in backend.atlas_views {
+		wgpu.TextureViewRelease(view)
+	}
+	clear(&backend.atlas_views)
+	for _, texture in backend.atlas_textures {
+		wgpu.TextureRelease(texture)
+	}
+	clear(&backend.atlas_textures)
 
 	for index in 0 ..< FRAMES_IN_FLIGHT {
 		if backend.ring[index].buffer != nil {
@@ -732,6 +788,8 @@ backend_release_gpu :: proc(backend: ^Backend) {
 backend_destroy :: proc(backend: ^Backend) {
 	backend_release_gpu(backend)
 	delete(backend.atlas_groups)
+	delete(backend.atlas_textures)
+	delete(backend.atlas_views)
 	delete(backend.instances)
 	backend^ = {}
 }
