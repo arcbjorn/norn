@@ -37,6 +37,7 @@ and native UI are not built yet.
 | Draw lists, batching, timeline panel | Implemented |
 | WGPU backend (pipelines, instance ring, scissor) | Implemented |
 | Window, frame loop, keyboard navigation | Implemented |
+| Glyph atlas, text layout, lane labels | Implemented |
 | Remaining panels (inspector, diff, repository map) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
@@ -125,7 +126,7 @@ src/
   replay/        virtual repository, patching, seeking, comparison
   analysis/      outcomes, comparability, scoring, evidence, attempts
   app/           selection, commands, window, frame loop
-  render/        draw lists, primitives, batching, WGPU backend
+  render/        draw lists, primitives, batching, fonts, WGPU backend
   ui/            viewport transforms, virtualization, panels
   export/        bundle assembly, HTML report, canonical JSON
 tests/
@@ -135,7 +136,7 @@ tests/
   replay/  patching, mutation chains, and seek properties
   analysis/ comparability, scoring weights, and evidence ordering
   export/  encoding, injection resistance, and determinism
-  render/  draw list culling, clipping, batching, instance layout
+  render/  draw list culling, clipping, batching, glyph atlases
   ui/      transform inverses, virtualization, and drawn output
   app/     command routing, keyboard bindings, and playback
 spike/    throwaway phase-zero validation programs
@@ -181,5 +182,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-272 tests across nine packages. See [Quality](docs/09-quality.md) for the
+287 tests across nine packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.

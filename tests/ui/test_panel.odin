@@ -1,5 +1,6 @@
 package test_ui
 
+import "core:os"
 import "core:testing"
 
 import "src:render"
@@ -388,4 +389,115 @@ every_lane_has_a_distinct_colour :: proc(t: ^testing.T) {
 		append(&seen, color)
 	}
 	testing.expect_value(t, len(seen), ui.LANE_COUNT)
+}
+
+@(test)
+lane_labels_are_complete_at_every_display_scale :: proc(t: ^testing.T) {
+	// The label box must be sized in the same units the glyphs were
+	// rasterized in. Sizing it from an unscaled constant while the atlas is
+	// built at 2x silently truncates the longer names on every high-DPI
+	// display, which is exactly the kind of defect that survives a casual look
+	// at the window.
+	fonts: render.Font_Set
+	if !load_ui_font(&fonts) {
+		testing.fail_now(t, "no system font available to test against")
+	}
+	defer render.font_set_destroy(&fonts)
+
+	builder: Builder
+	builder_init(&builder)
+	defer builder_destroy(&builder)
+	add(&builder, .File_Modify, SECOND)
+
+	expected := 0
+	for lane in ui.Lane {
+		expected += len(ui.lane_name(lane))
+	}
+
+	for scale in ([]f32{1, 1.5, 2}) {
+		atlas := render.get_atlas(
+			&fonts,
+			render.Atlas_Key{font = .Interface, size = 12, scale = scale},
+		)
+		gutter := ui.LABEL_GUTTER * scale
+		lane_height := 40 * scale
+		bounds := render.Rect{0, 0, 1000 + gutter, f32(ui.LANE_COUNT) * lane_height}
+
+		viewport := ui.viewport_make(0, 20 * SECOND, 1000, gutter)
+		set := ui.query_visible(&builder.trace, ui.build_index(&builder.trace), viewport)
+		defer ui.visible_set_destroy(&set)
+
+		list: render.Draw_List
+		render.draw_list_init(&list)
+		defer render.draw_list_destroy(&list)
+		render.draw_list_reset(&list, bounds)
+
+		ui.draw_timeline(
+			&list,
+			ui.Panel_State {
+				viewport = viewport,
+				layout = ui.Lane_Layout {
+					origin_y = bounds.y0,
+					lane_height = lane_height,
+					padding = 6 * scale,
+				},
+				bounds = bounds,
+				theme = ui.DARK_THEME,
+				fonts = &fonts,
+				atlas = atlas,
+			},
+			&set,
+		)
+
+		glyphs := count_kind(&list, .Glyph)
+		testing.expectf(
+			t,
+			glyphs == expected,
+			"at %.1fx scale only %d of %d label glyphs were drawn",
+			scale,
+			glyphs,
+			expected,
+		)
+	}
+}
+
+@(test)
+labels_are_omitted_when_no_font_is_available :: proc(t: ^testing.T) {
+	// A missing typeface must degrade to an unlabelled timeline rather than
+	// to boxes, which would look like data.
+	builder: Builder
+	builder_init(&builder)
+	defer builder_destroy(&builder)
+	add(&builder, .File_Modify, SECOND)
+
+	viewport := ui.viewport_make(0, 10 * SECOND, 1000)
+	set := ui.query_visible(&builder.trace, ui.build_index(&builder.trace), viewport)
+	defer ui.visible_set_destroy(&set)
+
+	list: render.Draw_List
+	render.draw_list_init(&list)
+	defer render.draw_list_destroy(&list)
+	render.draw_list_reset(&list, PANEL_BOUNDS)
+
+	ui.draw_timeline(&list, panel_state(viewport), &set)
+
+	testing.expect_value(t, count_kind(&list, .Glyph), 0)
+	testing.expect(t, render.command_count(&list) > 0, "the timeline itself still draws")
+}
+
+@(private)
+load_ui_font :: proc(set: ^render.Font_Set) -> bool {
+	render.font_set_init(set)
+	candidates := []string {
+		"/System/Library/Fonts/SFNS.ttf",
+		"/System/Library/Fonts/Helvetica.ttc",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+	}
+	for path in candidates {
+		if os.exists(path) && render.load_face(set, .Interface, path) {
+			return true
+		}
+	}
+	return false
 }

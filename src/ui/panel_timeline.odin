@@ -83,12 +83,23 @@ LAYER_FAILURES   :: u16(2)
 LAYER_SELECTION  :: u16(3)
 LAYER_PLAYHEAD   :: u16(4)
 
+// LABEL_GUTTER is the width reserved for lane names, in device pixels.
+//
+// Lane labels are the difference between a timeline and a set of coloured
+// bars. docs/01 requires the interface to be readable, and a lane whose
+// meaning the user has to remember is not.
+LABEL_GUTTER :: f32(96)
+
 // Panel_State is what the timeline needs beyond the trace itself.
 Panel_State :: struct {
 	viewport:  Viewport,
 	layout:    Lane_Layout,
 	bounds:    render.Rect,
 	theme:     Theme,
+	// Fonts for lane labels. Nil draws no text, which is what happens when no
+	// typeface could be loaded — better than boxes that look like data.
+	fonts: ^render.Font_Set,
+	atlas: ^render.Atlas,
 	// The currently selected event, or NO_EVENT.
 	selection: model.Event_Id,
 	// The playhead time. docs/01 makes the selected time control every panel.
@@ -149,6 +160,51 @@ draw_lane_backgrounds :: proc(list: ^render.Draw_List, state: Panel_State) {
 			state.bounds.x1,
 			bottom,
 			state.theme.lane_separator,
+		)
+	}
+
+	draw_lane_labels(list, state)
+}
+
+// draw_lane_labels names each swimlane in the gutter.
+@(private)
+draw_lane_labels :: proc(list: ^render.Draw_List, state: Panel_State) {
+	if state.fonts == nil || state.atlas == nil {
+		return
+	}
+
+	// The gutter is the space between the panel's left edge and where the
+	// viewport begins. Deriving it from the viewport rather than from the
+	// LABEL_GUTTER constant is what keeps it correct on a high-DPI display:
+	// the caller scales the constant when it places the viewport, and reading
+	// the unscaled constant here would size the label box in logical pixels
+	// while the glyphs were rasterized in device pixels.
+	gutter := state.viewport.origin_x - state.bounds.x0
+	if gutter <= 0 {
+		return
+	}
+
+	for lane in Lane {
+		top := state.layout.origin_y + f32(int(lane)) * state.layout.lane_height
+		box := render.Rect {
+			x0 = state.bounds.x0 + 6,
+			y0 = top,
+			x1 = state.bounds.x0 + gutter - 6,
+			y1 = top + state.layout.lane_height,
+		}
+
+		// The label is tinted with its lane's colour rather than drawn in the
+		// neutral text colour, which ties the name to the bars beneath it
+		// without relying on position alone.
+		color := lane_color(state.theme, lane)
+		render.draw_text_aligned(
+			list,
+			state.fonts,
+			state.atlas,
+			lane_name(lane),
+			box,
+			.Left,
+			render.with_alpha(color, 0.85),
 		)
 	}
 }

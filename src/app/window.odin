@@ -37,6 +37,12 @@ Window :: struct {
 	list:  render.Draw_List,
 	frame: render.Batched_Frame,
 
+	// Typefaces and the atlases derived from them. `fonts_loaded` is false
+	// when no usable face was found, which degrades to an unlabelled timeline
+	// rather than preventing the window from opening.
+	fonts:        render.Font_Set,
+	fonts_loaded: bool,
+
 	// Framebuffer size in pixels and the display scale that produced it.
 	width, height: f32,
 	scale:         f32,
@@ -188,9 +194,12 @@ timeline_bounds :: proc(window: ^Window) -> render.Rect {
 // run drives the frame loop until the user quits.
 run :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 	index := ui.build_index(trace)
+	if !load_fonts(window) {
+		fmt.eprintln("norn: no usable font was found; the timeline will draw without labels")
+	}
+
 	bounds := timeline_bounds(window)
-	resize(state, render.rect_width(bounds))
-	state.viewport.origin_x = bounds.x0
+	apply_layout(window, state, bounds)
 
 	previous := time.tick_now()
 
@@ -341,9 +350,57 @@ handle_resize :: proc(window: ^Window, state: ^State) {
 	wgpu.SurfaceConfigure(window.surface, &window.config)
 
 	bounds := timeline_bounds(window)
-	state.viewport.origin_x = bounds.x0
-	resize(state, render.rect_width(bounds))
+	apply_layout(window, state, bounds)
 	window.needs_redraw = true
+}
+
+// apply_layout sizes the viewport to the timeline area.
+//
+// The label gutter is subtracted here rather than inside the panel, because
+// the viewport transform is what hit testing uses: an event drawn past the
+// gutter must also be clickable there, and two different notions of where the
+// timeline starts is exactly the drift docs/07 prohibits.
+@(private)
+apply_layout :: proc(window: ^Window, state: ^State, bounds: render.Rect) {
+	gutter := ui.LABEL_GUTTER * window.scale if window.fonts_loaded else 0
+	state.viewport.origin_x = bounds.x0 + gutter
+	resize(state, render.rect_width(bounds) - gutter)
+}
+
+// load_fonts loads the interface and monospace faces.
+//
+// The candidates are macOS system fonts. docs/13 records that bundling a face
+// or discovering one per platform is an open packaging question; until it is
+// answered, a missing font degrades to an unlabelled timeline rather than
+// preventing the application from opening.
+@(private)
+load_fonts :: proc(window: ^Window) -> bool {
+	render.font_set_init(&window.fonts)
+
+	interface_candidates := []string {
+		"/System/Library/Fonts/SFNS.ttf",
+		"/System/Library/Fonts/Helvetica.ttc",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+	}
+	monospace_candidates := []string {
+		"/System/Library/Fonts/SFNSMono.ttf",
+		"/System/Library/Fonts/Menlo.ttc",
+		"/System/Library/Fonts/Supplemental/Andale Mono.ttf",
+	}
+
+	for path in interface_candidates {
+		if render.load_face(&window.fonts, .Interface, path) {
+			break
+		}
+	}
+	for path in monospace_candidates {
+		if render.load_face(&window.fonts, .Monospace, path) {
+			break
+		}
+	}
+
+	window.fonts_loaded = render.has_face(&window.fonts, .Interface)
+	return window.fonts_loaded
 }
 
 // draw_frame performs the remaining stages of the documented frame order.
@@ -364,10 +421,25 @@ draw_frame :: proc(
 	render.draw_list_reset(&window.list, surface)
 
 	lane_height := render.rect_height(bounds) / f32(ui.LANE_COUNT)
+
+	// The atlas is fetched per frame rather than cached on the window: the
+	// scale factor changes when the window moves between displays, and the
+	// cache key includes it, so asking each frame is what keeps text crisp
+	// after such a move.
+	atlas: ^render.Atlas
+	if window.fonts_loaded {
+		atlas = render.get_atlas(
+			&window.fonts,
+			render.Atlas_Key{font = .Interface, size = 12, scale = window.scale},
+		)
+	}
+
 	ui.draw_timeline(
 		&window.list,
 		ui.Panel_State {
 			viewport = state.viewport,
+			fonts = &window.fonts if window.fonts_loaded else nil,
+			atlas = atlas,
 			layout = ui.Lane_Layout {
 				origin_y = bounds.y0,
 				lane_height = lane_height,
@@ -384,6 +456,10 @@ draw_frame :: proc(
 
 	// 7. GPU batching.
 	render.build_batches(&window.list, &window.frame)
+
+	// Glyphs are rasterized lazily during draw-list generation, so the atlas
+	// is uploaded after the panel has run and before anything samples it.
+	render.upload_atlas(&window.backend, atlas)
 
 	// 8. Submit and present.
 	texture := wgpu.SurfaceGetCurrentTexture(window.surface)
@@ -470,6 +546,7 @@ close :: proc(window: ^Window) {
 	render.backend_destroy(&window.backend)
 	render.draw_list_destroy(&window.list)
 	render.batched_frame_destroy(&window.frame)
+	render.font_set_destroy(&window.fonts)
 
 	if window.queue != nil {
 		wgpu.QueueRelease(window.queue)

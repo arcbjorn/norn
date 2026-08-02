@@ -164,6 +164,16 @@ spikes. The CPU-side cost of query, layout, draw-list construction and batching
 was measured separately at 0.014 ms for a typical zoom and 2.4 ms with all
 100,000 reference events visible.
 
+### Carried into the renderer
+
+The text spike's approach is now `src/render/font.odin`, with the atlas cache
+keyed by font, size, and scale as measured. Wiring it into the timeline
+surfaced a defect the spike could not: the panel sized its label box from an
+unscaled constant while the atlas was rasterized at the display scale, so the
+longer lane names were silently truncated on every high-DPI display. The box
+is now derived from the viewport origin, which the caller has already scaled,
+and a test asserts every label survives at 1x, 1.5x, and 2x.
+
 ## Dependency findings
 
 ### wgpu-native is not vendored for macOS
