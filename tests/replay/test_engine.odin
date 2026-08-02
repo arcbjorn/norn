@@ -417,3 +417,168 @@ binary_content_is_opaque_not_reconstructed :: proc(t: ^testing.T) {
 	testing.expect_value(t, resolved.status, replay.Resolved_Status.Binary)
 	testing.expect(t, !replay.has_content(resolved), "binary content is metadata only")
 }
+
+// Baseline verification.
+//
+// Phase 2 requires the importer to "capture and verify repository baseline
+// content", and docs/06 reserves the verified label for content "verified
+// against recorded hashes". The manifest and the blob table are two records of
+// the same file, and nothing guarantees they agree — a truncated write, a
+// tampered trace, or an importer bug puts them out of step.
+//
+// Before these tests, the digest was written at import and never read: an entry
+// whose hash contradicted its content was reported Verified, which is the
+// strongest claim Norn makes, about bytes it had never checked.
+
+@(test)
+baseline_content_matching_its_digest_is_verified :: proc(t: ^testing.T) {
+	session: Session
+	session_init(&session, .Commit_Verified)
+	defer session_destroy(&session)
+
+	baseline_file(&session, 1, "package a\n")
+
+	engine: replay.Engine
+	replay.engine_init(&engine, session_source(&session))
+	defer replay.engine_destroy(&engine)
+	replay.engine_reset(&engine, &session.baseline)
+
+	resolved := replay.resolve(&engine, 1)
+	testing.expect_value(t, resolved.status, replay.Resolved_Status.Verified)
+	testing.expect_value(t, string(resolved.content), "package a\n")
+}
+
+@(test)
+baseline_content_contradicting_its_digest_is_a_gap :: proc(t: ^testing.T) {
+	// A mismatch is a gap rather than a downgrade. The manifest and the blob
+	// table disagreeing means one is wrong and Norn cannot tell which, so
+	// showing the bytes under a weaker label would present content that may
+	// belong to an entirely different file.
+	session: Session
+	session_init(&session, .Commit_Verified)
+	defer session_destroy(&session)
+
+	baseline_file_with_digest(
+		&session,
+		1,
+		"package a\n",
+		model.digest_content(transmute([]byte)string("something else entirely\n")),
+	)
+
+	engine: replay.Engine
+	replay.engine_init(&engine, session_source(&session))
+	defer replay.engine_destroy(&engine)
+	replay.engine_reset(&engine, &session.baseline)
+
+	resolved := replay.resolve(&engine, 1)
+	testing.expect_value(t, resolved.status, replay.Resolved_Status.Gap)
+	testing.expect(
+		t,
+		len(resolved.content) == 0,
+		"content that failed verification must not be handed to the viewer",
+	)
+}
+
+@(test)
+a_baseline_naming_content_the_trace_lacks_is_a_gap :: proc(t: ^testing.T) {
+	// The manifest points at a blob the table does not hold. Reporting the path
+	// as verified would claim content that cannot be produced at all.
+	session: Session
+	session_init(&session, .Commit_Verified)
+	defer session_destroy(&session)
+
+	append(
+		&session.baseline.entries,
+		replay.Baseline_Entry {
+			path = 1,
+			content = model.Blob_Id(999),
+			exists = true,
+			encoding = .Utf8,
+			digest = model.digest_content(transmute([]byte)string("anything\n")),
+		},
+	)
+
+	engine: replay.Engine
+	replay.engine_init(&engine, session_source(&session))
+	defer replay.engine_destroy(&engine)
+	replay.engine_reset(&engine, &session.baseline)
+
+	resolved := replay.resolve(&engine, 1)
+	testing.expect_value(t, resolved.status, replay.Resolved_Status.Gap)
+}
+
+@(test)
+an_observational_baseline_stays_observational_when_it_verifies :: proc(t: ^testing.T) {
+	// Verification confirms the bytes are the ones recorded; it does not
+	// upgrade how the baseline was obtained. A working-tree snapshot may
+	// already have drifted from what the session actually started with, and
+	// docs/06 keeps that distinction visible.
+	session: Session
+	session_init(&session, .Working_Tree_Observational)
+	defer session_destroy(&session)
+
+	baseline_file(&session, 1, "package a\n")
+
+	engine: replay.Engine
+	replay.engine_init(&engine, session_source(&session))
+	defer replay.engine_destroy(&engine)
+	replay.engine_reset(&engine, &session.baseline)
+
+	resolved := replay.resolve(&engine, 1)
+	testing.expect_value(t, resolved.status, replay.Resolved_Status.Observational)
+}
+
+@(test)
+a_baseline_without_a_digest_is_not_verified :: proc(t: ^testing.T) {
+	// A manifest that records no hash cannot support the verified claim, so the
+	// content is offered under a weaker label rather than withheld. Traces
+	// written before the digest existed still replay.
+	session: Session
+	session_init(&session, .Commit_Verified)
+	defer session_destroy(&session)
+
+	append(
+		&session.baseline.entries,
+		replay.Baseline_Entry {
+			path = 1,
+			content = add_content(&session, "package a\n"),
+			exists = true,
+			encoding = .Utf8,
+			// No digest.
+		},
+	)
+
+	engine: replay.Engine
+	replay.engine_init(&engine, session_source(&session))
+	defer replay.engine_destroy(&engine)
+	replay.engine_reset(&engine, &session.baseline)
+
+	resolved := replay.resolve(&engine, 1)
+	testing.expect_value(t, resolved.status, replay.Resolved_Status.Unverified)
+	testing.expect_value(t, string(resolved.content), "package a\n")
+}
+
+@(test)
+verification_survives_a_reset :: proc(t: ^testing.T) {
+	// engine_reset re-applies the manifest, so a tampered entry must not become
+	// verified by seeking away and back.
+	session: Session
+	session_init(&session, .Commit_Verified)
+	defer session_destroy(&session)
+
+	baseline_file_with_digest(
+		&session,
+		1,
+		"package a\n",
+		model.digest_content(transmute([]byte)string("wrong\n")),
+	)
+
+	engine: replay.Engine
+	replay.engine_init(&engine, session_source(&session))
+	defer replay.engine_destroy(&engine)
+
+	for _ in 0 ..< 3 {
+		replay.engine_reset(&engine, &session.baseline)
+		testing.expect_value(t, replay.resolve(&engine, 1).status, replay.Resolved_Status.Gap)
+	}
+}

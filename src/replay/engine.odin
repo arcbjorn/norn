@@ -83,7 +83,19 @@ engine_reset :: proc(engine: ^Engine, baseline: ^Baseline) {
 	clear(&engine.outcomes)
 	engine.position = 0
 	engine.applied = 0
-	baseline_apply(baseline, &engine.state)
+	// The engine's own source, so the manifest is checked against the blobs the
+	// trace actually holds rather than trusted.
+	baseline_apply(
+		baseline,
+		&engine.state,
+		Content_Resolver {
+			user_data = engine,
+			fetch = proc(user_data: rawptr, id: model.Blob_Id) -> ([]byte, bool) {
+				engine := cast(^Engine)user_data
+				return engine_content(engine, recorded_content(id))
+			},
+		},
+	)
 }
 
 // engine_content resolves a blob from either the trace or the reconstruction

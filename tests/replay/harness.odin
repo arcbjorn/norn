@@ -54,6 +54,10 @@ add_content :: proc(session: ^Session, text: string) -> model.Blob_Id {
 }
 
 // baseline_file declares a path that existed with known content at start.
+//
+// The digest is recorded because the importer records one: docs/06 reserves
+// the verified label for content checked against a recorded hash, and a
+// harness that omitted it would exercise only the weaker path.
 baseline_file :: proc(session: ^Session, path: model.Entity_Id, text: string) {
 	append(
 		&session.baseline.entries,
@@ -62,6 +66,27 @@ baseline_file :: proc(session: ^Session, path: model.Entity_Id, text: string) {
 			content = add_content(session, text),
 			exists = true,
 			encoding = .Utf8,
+			digest = model.digest_content(transmute([]byte)text),
+		},
+	)
+}
+
+// baseline_file_with_digest declares a path whose recorded digest is supplied
+// separately, so a test can make the manifest and the content disagree.
+baseline_file_with_digest :: proc(
+	session: ^Session,
+	path: model.Entity_Id,
+	text: string,
+	digest: model.Blob_Digest,
+) {
+	append(
+		&session.baseline.entries,
+		replay.Baseline_Entry {
+			path = path,
+			content = add_content(session, text),
+			exists = true,
+			encoding = .Utf8,
+			digest = digest,
 		},
 	)
 }

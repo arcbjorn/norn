@@ -196,15 +196,33 @@ baseline_destroy :: proc(baseline: ^Baseline) {
 // A commit-verified baseline yields Verified content; a working-tree baseline
 // yields Observational. The difference survives into every later state, so the
 // viewer can say which files rest on a snapshot that may already have drifted.
-baseline_apply :: proc(baseline: ^Baseline, state: ^Repository_State) {
-	verification := Verification.Unknown
+//
+// docs/06 reserves the strongest label for content "verified against recorded
+// hashes", so `resolve` is required to make that claim: an entry whose digest
+// disagrees with the blob it names is a gap, not verified content. Passing a
+// nil resolver downgrades every entry to Unverified rather than trusting the
+// manifest — a caller that cannot check has not checked.
+baseline_apply :: proc(
+	baseline: ^Baseline,
+	state: ^Repository_State,
+	resolve: Content_Resolver = {},
+) {
+	claimed := Verification.Unknown
 	switch baseline.kind {
-	case .None:                       verification = .Unknown
-	case .Commit_Verified:            verification = .Verified
-	case .Working_Tree_Observational: verification = .Observational
+	case .None:                       claimed = .Unknown
+	case .Commit_Verified:            claimed = .Verified
+	case .Working_Tree_Observational: claimed = .Observational
 	}
 
 	for entry in baseline.entries {
+		verification := claimed
+		if entry.exists {
+			verification = verify_baseline_entry(entry, claimed, resolve)
+		} else {
+			// An entry recording absence carries no content to verify.
+			verification = .Unknown
+		}
+
 		state_put(
 			state,
 			Path_State {
@@ -213,11 +231,55 @@ baseline_apply :: proc(baseline: ^Baseline, state: ^Repository_State) {
 				content = recorded_content(entry.content),
 				exists = entry.exists,
 				encoding = entry.encoding,
-				// An entry recording absence carries no content to verify.
-				verification = verification if entry.exists else .Unknown,
+				verification = verification,
 			},
 		)
 	}
+}
+
+// Content_Resolver fetches a recorded blob so the baseline can be checked.
+//
+// A callback rather than the engine itself, because the manifest is applied
+// before the engine has any reconstruction of its own and must not be able to
+// resolve one by accident.
+Content_Resolver :: struct {
+	user_data: rawptr,
+	fetch:     proc(user_data: rawptr, id: model.Blob_Id) -> ([]byte, bool),
+}
+
+// verify_baseline_entry checks one entry's content against its recorded digest.
+//
+// A mismatch is a gap rather than a downgrade. The manifest and the blob table
+// disagreeing means one of them is wrong, and Norn cannot tell which — showing
+// the bytes under a weaker label would present content that may belong to a
+// different file entirely.
+@(private)
+verify_baseline_entry :: proc(
+	entry: Baseline_Entry,
+	claimed: Verification,
+	resolve: Content_Resolver,
+) -> Verification {
+	if entry.encoding == .Binary {
+		return .Binary
+	}
+	if model.digest_is_zero(entry.digest) {
+		// Nothing recorded to check against. Older traces predate the digest,
+		// and a manifest without one cannot support a verified claim.
+		return .Unverified if claimed == .Verified else claimed
+	}
+	if resolve.fetch == nil {
+		return .Unverified
+	}
+
+	content, got := resolve.fetch(resolve.user_data, entry.content)
+	if !got {
+		// The manifest names content the trace cannot produce.
+		return .Gap
+	}
+	if !model.digest_equal(model.digest_content(content), entry.digest) {
+		return .Gap
+	}
+	return claimed
 }
 
 // Content_Source resolves blob identifiers to bytes.
