@@ -72,8 +72,17 @@ inspect_repository :: proc(
 		return {}, core.err_path(.Not_Found, "the repository root is not a directory", root)
 	}
 
-	repository.root = strings.clone(root, allocator)
-	repository.name = strings.clone(base_name(root), allocator)
+	// Resolved before the name is taken from it. A user importing from inside
+	// the repository passes "." or a relative path, and a trace recording a
+	// repository named "." tells a later reader nothing.
+	resolved := root
+	if absolute, absolute_err := os.get_absolute_path(root, context.temp_allocator);
+	   absolute_err == nil {
+		resolved = absolute
+	}
+
+	repository.root = strings.clone(resolved, allocator)
+	repository.name = strings.clone(base_name(resolved), allocator)
 	repository.case_sensitive = probe_case_sensitivity(root)
 
 	// A repository without git is a legitimate subject. Everything below is
