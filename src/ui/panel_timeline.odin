@@ -117,6 +117,15 @@ Panel_State :: struct {
 	filtering: bool,
 	// Scale, for text placed in the empty state.
 	scale: f32,
+
+	// A one-line summary of the session's import warnings, empty when there
+	// are none. docs/01 keeps warnings "part of the session metadata" rather
+	// than letting them vanish with the import dialog, and an overlay a user
+	// must already know about is nearly as invisible as no overlay at all.
+	warning_summary: string,
+	// True when a warning limits what can be concluded rather than only
+	// reducing completeness, so the notice can carry more weight.
+	warning_serious: bool,
 }
 
 // FAILURE_MARKER_HEIGHT is the height of the tick drawn above a failure.
@@ -151,6 +160,35 @@ draw_timeline :: proc(
 	draw_events(list, state, set)
 	draw_selection(list, state, set)
 	draw_playhead(list, state)
+	draw_warning_notice(list, state)
+}
+
+// draw_warning_notice puts the session's import warnings where they cannot be
+// missed.
+//
+// Bottom-left of the timeline, out of the way of the lanes but always present.
+// A trace can be quietly incomplete — records dropped, timestamps repaired —
+// and every panel would still render confidently. This is the standing reminder
+// that some of what is not shown was not absent from the session.
+@(private)
+draw_warning_notice :: proc(list: ^render.Draw_List, state: Panel_State) {
+	if state.warning_summary == "" || state.fonts == nil || state.atlas == nil {
+		return
+	}
+
+	scale := state.scale if state.scale > 0 else 1
+	colour := state.theme.failure if state.warning_serious else state.theme.lane_label
+
+	render.draw_text_clipped(
+		list,
+		state.fonts,
+		state.atlas,
+		state.warning_summary,
+		state.bounds.x0 + 8 * scale,
+		state.bounds.y1 - 16 * scale,
+		render.rect_width(state.bounds) - 16 * scale,
+		colour,
+	)
 }
 
 // draw_empty_state says why the timeline has nothing to show.
