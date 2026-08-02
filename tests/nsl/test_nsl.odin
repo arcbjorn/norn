@@ -930,3 +930,57 @@ parsing_memory_does_not_grow_with_the_log :: proc(t: ^testing.T) {
 		small,
 	)
 }
+
+@(test)
+invalid_utf8_is_refused_before_the_json_parser :: proc(t: ^testing.T) {
+	// A hostile log containing raw invalid UTF-8 aborted the process before this
+	// check existed. Odin's JSON string decoder sizes its output buffer from the
+	// input length, but an invalid byte decodes to RUNE_ERROR and re-encodes to
+	// three bytes, so a single 0xFF writes past the end and traps.
+	//
+	// docs/08 requires UTF-8 validation at the boundary regardless. Keeping the
+	// test at this level means an upstream repair cannot quietly remove the
+	// protection without something noticing.
+	harness: Harness
+	begin(&harness)
+	defer finish(&harness)
+
+	hostile := []string {
+		"\xff\xfe",             // never valid
+		"\xc0\x80",             // overlong NUL
+		"\xed\xa0\x80",         // a surrogate half
+		"\xe2\x82",             // truncated three-byte sequence
+		"\xf0\x9f",             // truncated four-byte sequence
+	}
+
+	builder := strings.builder_make(context.temp_allocator)
+	strings.write_string(&builder, HEADER)
+	strings.write_byte(&builder, '\n')
+	for bytes, index in hostile {
+		fmt.sbprintfln(
+			&builder,
+			`{{"type":"message","t":%d,"role":"user","text":"bad %s here"}}`,
+			index + 1,
+			bytes,
+		)
+	}
+	// A valid record after the damage: the import must continue rather than
+	// discard a session that is otherwise readable.
+	fmt.sbprintfln(
+		&builder,
+		`{{"type":"message","t":99,"role":"user","text":"still readable"}}`,
+	)
+
+	sink := run(t, &harness, strings.to_string(builder))
+
+	// Every malformed record counted, none carried into the trace, and the
+	// valid one kept.
+	testing.expect_value(t, sink.report.ignored_records, u64(len(hostile)))
+	testing.expect_value(t, len(sink.events), 1)
+	testing.expect_value(t, text_of(sink, sink.events[0].summary_string_id), "still readable")
+	testing.expect(
+		t,
+		sink.report.warnings[int(codec.Warning_Category.Malformed_Record)] >= u32(len(hostile)),
+		"each rejected record must be reported",
+	)
+}

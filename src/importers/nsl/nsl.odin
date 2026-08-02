@@ -4,6 +4,7 @@ import "core:encoding/json"
 import "core:mem"
 import "core:mem/virtual"
 import "core:strings"
+import "core:unicode/utf8"
 
 import "src:core"
 import api "src:importers/api"
@@ -58,8 +59,8 @@ detect :: proc(prefix: []byte, path_hint: string) -> api.Detection {
 	// Detection reads the header only, and never parses the whole prefix:
 	// detection runs against every registered adapter, and a hostile file
 	// should not be parsed once per adapter.
-	value, err := json.parse_string(line, allocator = context.temp_allocator)
-	if err != nil {
+	value, parsed := parse_record(line, context.temp_allocator)
+	if !parsed {
 		return detection
 	}
 
@@ -148,8 +149,8 @@ inspect :: proc(
 		// Released at the end of each iteration, so peak usage is one record.
 		defer free_all(record_allocator)
 
-		value, parse_err := json.parse_string(record, allocator = record_allocator)
-		if parse_err != nil {
+		value, parsed := parse_record(record, record_allocator)
+		if !parsed {
 			continue
 		}
 		object, is_object := value.(json.Object)
@@ -194,6 +195,36 @@ inspect :: proc(
 	return metadata, nil
 }
 
+// parse_record parses one line, refusing invalid UTF-8 first.
+//
+// docs/08 requires UTF-8 validation to be bounded and every length checked
+// before use. The check also guards a real defect in Odin's JSON string
+// decoder: it sizes the output buffer from the input length, but an invalid
+// byte decodes to RUNE_ERROR, which encodes to three bytes. A single stray
+// 0xFF therefore writes past the end of the buffer and aborts the process —
+// reachable from any hostile log, and found by the hostile fixture suite.
+//
+// Validating here rather than working around it downstream keeps the fix at
+// the trust boundary, where docs/08 puts it, and means an upstream repair does
+// not silently remove the protection.
+@(private)
+parse_record :: proc(
+	line: string,
+	allocator: mem.Allocator,
+) -> (
+	value: json.Value,
+	ok: bool,
+) {
+	if !utf8.valid_string(line) {
+		return nil, false
+	}
+	parsed, err := json.parse_string(line, allocator = allocator)
+	if err != nil {
+		return nil, false
+	}
+	return parsed, true
+}
+
 @(private)
 Header :: struct {
 	variant:    string,
@@ -202,8 +233,8 @@ Header :: struct {
 
 @(private)
 parse_header :: proc(line: string) -> (header: Header, err: core.Error) {
-	value, parse_err := json.parse_string(line, allocator = context.temp_allocator)
-	if parse_err != nil {
+	value, parsed := parse_record(line, context.temp_allocator)
+	if !parsed {
 		return {}, core.err_make(.Malformed_Container, "the header is not valid JSON")
 	}
 
@@ -354,10 +385,12 @@ import_source :: proc(source: []byte, sink: ^api.Sink, options: api.Options) -> 
 import_record :: proc(state: ^Import_State, record: string) {
 	sink := state.sink
 
-	value, parse_err := json.parse_string(record, allocator = context.temp_allocator)
-	if parse_err != nil {
+	value, parsed := parse_record(record, context.temp_allocator)
+	if !parsed {
 		// A truncated final line is the common case, and refusing the whole log
 		// for it would discard a session that is otherwise entirely readable.
+		// Invalid UTF-8 lands here too: it cannot be interned or rendered, so it
+		// is counted rather than carried into the trace.
 		api.note_warning(sink, .Malformed_Record)
 		api.note_ignored(sink)
 		return
@@ -949,8 +982,8 @@ import_unknown :: proc(state: ^Import_State, kind: string, record: string) {
 
 	// The envelope timestamp is still honoured, so an extension event sits in
 	// the right place on the timeline even though its body is uninterpreted.
-	value, parse_err := json.parse_string(record, allocator = context.temp_allocator)
-	if parse_err == nil {
+	value, parsed := parse_record(record, context.temp_allocator)
+	if parsed {
 		if object, is_object := value.(json.Object); is_object {
 			input.wall_time_ns, input.has_wall_time = timing(object)
 		}
