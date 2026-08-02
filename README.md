@@ -10,9 +10,16 @@ The full specification lives in [`docs/`](docs/README.md). Start with
 ## Status
 
 Early implementation. The canonical trace model, the `.norn` container codec,
-the replay engine, evidence analysis, and redacted export all work, along with
-the `inspect`, `validate`, `explain`, and `export` CLI commands. The importer
-and native UI are not built yet.
+the import pipeline, the replay engine, evidence analysis, redacted export, and
+the native UI all work. `norn import` converts a session log into a validated
+trace, and the whole workflow — import, validate, replay, diagnose, export —
+runs end to end.
+
+The one significant gap is a provider adapter. docs/05 requires adapter support
+to rest on fixtures rather than assumptions, and pinning a provider schema needs
+real sample traces. Until then Norn imports [NSL](docs/14-nsl-format.md), a
+session-log format it defines and owns, which exercises every mapping
+requirement in the adapter contract and generates the fixture tiers.
 
 | Area | State |
 | --- | --- |
@@ -30,7 +37,10 @@ and native UI are not built yet.
 | Redacted HTML and canonical JSON export | Implemented |
 | `norn inspect` / `validate` / `explain` / `export` | Implemented |
 | Importer contract, record sink, redaction | Implemented |
-| Codex adapter (needs sanitized fixtures) | Not started |
+| Import pipeline and repository identity capture | Implemented |
+| NSL adapter and deterministic fixture generator | Implemented |
+| `norn import` | Implemented |
+| Codex adapter (needs real sample traces) | Not started |
 | Annotation overlays and bookmarks | Not started |
 | SDL3 + WGPU stack validation (decision 002) | Confirmed |
 | Text rendering and glyph atlas validation | Confirmed |
@@ -44,11 +54,14 @@ and native UI are not built yet.
 | All four diff comparison modes | Implemented |
 | Deterministic graph layout and repository map | Implemented |
 | Replay driven from the playhead | Implemented |
+| Hostile fixture suite and security gate | Implemented |
+| Replay seek benchmark | Implemented |
 
-Replay currently starts from an empty baseline, because capturing a repository
-baseline is the importer's job and the importer does not exist yet. A patch
-against a file replay has never seen is therefore a `missing_baseline` gap —
-the honest result for a trace that carries no baseline.
+Replay starts from an empty baseline: the importer records repository identity
+but does not yet capture baseline file content. A patch against a file replay
+has never seen is therefore a `missing_baseline` gap — the honest result for a
+trace that carries no baseline. A mutation that records its own before and after
+content replays and verifies normally, which is what the fixtures exercise.
 
 ## Requirements
 
@@ -81,6 +94,8 @@ the same thing:
 scripts/norn.sh build [debug|release|sanitize|profile]
 scripts/norn.sh test [package]
 scripts/norn.sh check
+scripts/norn.sh fixture <tiny|representative|reference|stress> [out]
+scripts/norn.sh bench <trace.norn>
 scripts/norn.sh spike graphics [--frames N] [--events N]
 scripts/norn.sh spike text [--frames N]
 scripts/norn.sh spike backend [--frames N]
@@ -91,12 +106,19 @@ The product CLI:
 
 ```sh
 norn open    <trace.norn>
+norn import  <source> --repo <path> [--format <id>] [--out file.norn] [--dry-run]
 norn inspect <trace.norn> [--json]
 norn validate <trace.norn> [--mode quick|full|replay]
 norn explain <trace.norn> --list
 norn explain <trace.norn> --event <id>
 norn export  <trace.norn> --out <dir> [--range start:end] [--event <id>]
 ```
+
+`import` reads a session log and writes a validated `.norn` trace. It never
+executes the source or anything named inside it, redacts before writing, and
+reports what it repaired, ignored, or replaced. `--dry-run` reports what a
+source contains — including record types the adapter cannot map — without
+writing output.
 
 `open` launches the desktop application: a virtualized timeline with the
 keyboard navigation from [User experience](docs/01-user-experience.md) — arrows
@@ -142,7 +164,11 @@ src/
   ui/            viewport transforms, virtualization, and the four panels
   export/        bundle assembly, HTML report, canonical JSON
   importers/
-    api/         adapter contract, record sink, redaction
+    api/         adapter contract, record sink, redaction, pipeline
+    nsl/         the Norn Session Log adapter
+  tools/
+    genfixture/  deterministic fixture generation
+    bench/       replay seek and reconstruction benchmark
 tests/
   core/    arithmetic, path safety, checksum vectors
   model/   interning and blob identity
@@ -150,7 +176,9 @@ tests/
   replay/  patching, mutation chains, seek properties, diff reconstruction
   analysis/ comparability, scoring weights, evidence ordering, layout
   export/  encoding, injection resistance, and determinism
-  importers/ redaction rules, sink invariants, detection
+  importers/ redaction rules, sink invariants, detection, pipeline, digests
+  nsl/     adapter mapping, malformed input, streaming bounds
+  fixtures/hostile/  adversarial sources for the security gate
   render/  draw list culling, clipping, batching, glyph atlases
   ui/      transform inverses, virtualization, and drawn output
   app/     command routing, keyboard bindings, playback, playhead replay
@@ -197,5 +225,13 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-401 tests across ten packages. See [Quality](docs/09-quality.md) for the
+466 tests across eleven packages, plus 45 CLI contract checks and 122 security
+checks against the hostile fixtures. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
+
+The security gate (`scripts/test-security.sh`) runs every fixture in
+`tests/fixtures/hostile` through the built binary and asserts the outcome rather
+than the mechanism: no sentinel file was created, the repository hash is
+unchanged, no export leaked a secret or produced active markup, and memory
+stayed bounded. It found a buffer overflow in JSON string decoding on its first
+run — see [Spike results](docs/13-spike-results.md).

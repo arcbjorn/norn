@@ -23,6 +23,7 @@ Read these documents in order when first joining the project.
 | [Rendering](07-rendering.md) | Native UI, GPU pipeline, and performance budgets |
 | [Security](08-security.md) | Trust boundaries, redaction, and safe handling |
 | [Quality](09-quality.md) | Test strategy, fixtures, benchmarks, and release gates |
+| [NSL format](14-nsl-format.md) | The session-log format Norn defines and imports |
 | [Development](10-development.md) | Repository layout, commands, style, and workflow |
 | [Roadmap](11-roadmap.md) | Milestones and definition of done |
 | [Decisions](12-decisions.md) | Accepted architectural decisions and open questions |
