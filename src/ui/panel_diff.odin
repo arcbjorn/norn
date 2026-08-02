@@ -64,7 +64,7 @@ DARK_DIFF :: Diff_Theme {
 	border             = render.Color{0.20, 0.21, 0.25, 1.0},
 	heading            = render.Color{0.94, 0.95, 0.97, 1.0},
 	gutter             = render.Color{0.13, 0.14, 0.17, 1.0},
-	line_number        = render.Color{0.45, 0.48, 0.55, 1.0},
+	line_number        = render.Color{0.54, 0.56, 0.60, 1.0},
 	text               = render.Color{0.84, 0.86, 0.90, 1.0},
 	muted              = render.Color{0.52, 0.55, 0.62, 1.0},
 	added_text         = render.Color{0.62, 0.88, 0.68, 1.0},
