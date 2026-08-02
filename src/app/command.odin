@@ -68,6 +68,11 @@ Command_Kind :: enum u8 {
 	Cycle_Diff_Mode,
 	Scroll_Diff,
 
+	// Import notes. docs/01: warnings "remain part of the session metadata"
+	// rather than vanishing with the import dialog.
+	Toggle_Warnings,
+	Scroll_Warnings,
+
 	// Lifecycle.
 	Quit,
 }
@@ -139,6 +144,7 @@ Key :: enum u8 {
 	N,
 	Return,
 	Backspace,
+	W,
 }
 
 // command_for_key translates a keystroke into a command.
@@ -151,9 +157,10 @@ command_for_key :: proc(
 	key: Key,
 	modifiers: Modifiers,
 	selection: Selection,
-	// Whether the search panel is open. Escape backs out one layer at a time,
-	// and search is the outermost, so the binding depends on it.
+	// Which overlays are open. Escape backs out one layer at a time, so the
+	// binding depends on what is currently showing.
 	search_open := false,
+	warnings_open := false,
 ) -> Command {
 	// An open search field owns the keyboard for anything a user could be
 	// typing. Otherwise `n` in a filename would jump to the next match and `d`
@@ -228,6 +235,9 @@ command_for_key :: proc(
 		}
 		return Command{kind = .Search_Next}
 
+	case .W:
+		return Command{kind = .Toggle_Warnings}
+
 	case .Escape:
 		// docs/01: "Escape — clear focus, then clear range." Two presses do
 		// two different things, which is what a user expects from a key that
@@ -238,6 +248,9 @@ command_for_key :: proc(
 		if search_open {
 			return Command{kind = .Search_Close}
 		}
+		if warnings_open {
+			return Command{kind = .Toggle_Warnings}
+		}
 		return Command{kind = .Clear}
 
 	case .Home:
@@ -247,9 +260,15 @@ command_for_key :: proc(
 		return Command{kind = .Cycle_Diff_Mode}
 
 	case .Page_Up:
+		if warnings_open {
+			return Command{kind = .Scroll_Warnings, lines = -60}
+		}
 		return Command{kind = .Scroll_Diff, lines = -20}
 
 	case .Page_Down:
+		if warnings_open {
+			return Command{kind = .Scroll_Warnings, lines = 60}
+		}
 		return Command{kind = .Scroll_Diff, lines = 20}
 
 	case .Digit_1: return Command{kind = .Toggle_Lane, lane = .Conversation}
@@ -302,6 +321,12 @@ State :: struct {
 	diff_scroll_lines: int,
 	// Which comparison the diff panel shows.
 	diff_mode: ui.Diff_Mode,
+	// Whether the import-notes panel is open, and how far it is scrolled.
+	warnings_open:   bool,
+	warnings_scroll: f32,
+	// Content height reported by the last draw, so scrolling can be clamped to
+	// what actually exists rather than to a guess.
+	warnings_height: f32,
 	// Which activity categories the repository map shows.
 	map_filter: analysis.Node_Filter,
 
@@ -596,6 +621,29 @@ apply :: proc(state: ^State, trace: ^codec.Trace, command: Command) -> (changed:
 		return step_search(state, trace, forward = true)
 	case .Search_Previous:
 		return step_search(state, trace, forward = false)
+
+	case .Toggle_Warnings:
+		state.warnings_open = !state.warnings_open
+		if !state.warnings_open {
+			state.warnings_scroll = 0
+		}
+		state.revision += 1
+		return true
+
+	case .Scroll_Warnings:
+		if !state.warnings_open {
+			return false
+		}
+		// Clamped against the height the panel reported, so the list cannot be
+		// scrolled past its own end into blank space.
+		limit := max(f32(0), state.warnings_height - 1)
+		next := clamp(state.warnings_scroll + f32(command.lines), 0, limit)
+		if next == state.warnings_scroll {
+			return false
+		}
+		state.warnings_scroll = next
+		state.revision += 1
+		return true
 
 	case .Toggle_Lane:
 		if command.lane in state.lanes {

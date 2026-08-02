@@ -71,6 +71,12 @@ Window :: struct {
 	needs_redraw: bool,
 }
 
+// WARNINGS_WIDTH and WARNINGS_HEIGHT size the import-notes overlay, in logical
+// pixels. Wide enough for a full sentence per line, since every line states a
+// consequence rather than a category name.
+WARNINGS_WIDTH :: f32(560)
+WARNINGS_HEIGHT :: f32(420)
+
 // TIMELINE_MARGIN is the space reserved around the timeline panel.
 TIMELINE_MARGIN :: f32(16)
 
@@ -300,6 +306,20 @@ diff_bounds :: proc(window: ^Window) -> render.Rect {
 	}
 }
 
+// warnings_bounds returns the rectangle the import-notes overlay occupies.
+//
+// An overlay rather than a reserved band: the notes are read once when a
+// question arises about the trace's completeness, not watched continuously.
+// Giving them permanent space would cost the timeline every session, including
+// the ones that imported cleanly.
+warnings_bounds :: proc(window: ^Window) -> render.Rect {
+	width := min(WARNINGS_WIDTH * window.scale, window.width - 32 * window.scale)
+	height := min(WARNINGS_HEIGHT * window.scale, window.height - 32 * window.scale)
+	x := (window.width - width) * 0.5
+	y := (window.height - height) * 0.5
+	return render.Rect{x0 = x, y0 = y, x1 = x + width, y1 = y + height}
+}
+
 // diff_visible reports whether the window is tall enough for the diff panel.
 @(private)
 diff_visible :: proc(window: ^Window) -> bool {
@@ -405,6 +425,7 @@ pump_events :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 				translate_modifiers(event.key.mod),
 				state.selection,
 				state.search_open,
+				state.warnings_open,
 			)
 			apply(state, trace, command)
 
@@ -610,6 +631,7 @@ translate_key :: proc "contextless" (scancode: sdl.Scancode) -> Key {
 	case .N:             return .N
 	case .RETURN:        return .Return
 	case .BACKSPACE:     return .Backspace
+	case .W:             return .W
 	case .PAGEUP:        return .Page_Up
 	case .PAGEDOWN:      return .Page_Down
 	case ._1:            return .Digit_1
@@ -768,6 +790,10 @@ draw_frame :: proc(
 			// whether the view was narrowed or the trace is simply empty.
 			total_events = len(trace.events),
 			filtering = state.lanes != ui.ALL_LANES || search_active(state),
+			// Hidden while the overlay is open, since it says the same thing
+			// at length two hundred pixels away.
+			warning_summary = "" if state.warnings_open else warning_notice(trace),
+			warning_serious = ui.has_serious_warnings(&trace.metadata),
 		},
 		&set,
 	)
@@ -840,6 +866,23 @@ draw_frame :: proc(
 
 	if diff_visible(window) {
 		draw_diff_panel(window, state, trace, session, heading)
+	}
+
+	// Last, so the overlay sits above every panel it covers.
+	if state.warnings_open {
+		state.warnings_height = ui.draw_warnings(
+			&window.list,
+			ui.Warning_State {
+				bounds = warnings_bounds(window),
+				theme = ui.DARK_WARNINGS,
+				fonts = &window.fonts if window.fonts_loaded else nil,
+				atlas = atlas,
+				heading_atlas = heading,
+				scale = window.scale,
+				scroll = state.warnings_scroll,
+			},
+			&trace.metadata,
+		)
 	}
 
 	// 7. GPU batching.
@@ -1126,4 +1169,19 @@ toggle_chip_at :: proc(
 		run_search(state, trace)
 		state.revision += 1
 	}
+}
+
+// warning_notice builds the standing summary, with the key that opens the
+// detail appended.
+//
+// The binding is included because the summary is the only place a user learns
+// the detail exists. A notice that reported a problem without saying how to
+// read it would be worse than none.
+@(private)
+warning_notice :: proc(trace: ^codec.Trace) -> string {
+	summary := ui.warning_summary(&trace.metadata)
+	if summary == "" {
+		return ""
+	}
+	return fmt.tprintf("%s  ·  press W for detail", summary)
 }
