@@ -41,7 +41,7 @@ and native UI are not built yet.
 | Event inspector with evidence stack | Implemented |
 | Line diffing and the diff viewer panel | Implemented |
 | Repository map panel | Not started |
-| Replay driven from the playhead | Not started |
+| Replay driven from the playhead | Implemented |
 
 Replay currently starts from an empty baseline, because capturing a repository
 baseline is the importer's job and the importer does not exist yet. A patch
@@ -101,7 +101,9 @@ keyboard navigation from [User experience](docs/01-user-experience.md) — arrow
 step between events, Shift between mutations, Command between outcomes, Space
 plays, brackets set a comparison range, and Escape backs out one layer at a
 time. Clicking an event opens it in the inspector, which shows its attributes
-and provenance, and for an outcome the ranked evidence behind it.
+and provenance, and for an outcome the ranked evidence behind it. Focusing a file with `F`
+reconstructs its content at the playhead in the panel below, labelled with how
+much replay could verify.
 
 `explain` is the diagnosis workflow: select a failed outcome and it reports the
 evidence behind it, separated into explicit, reconstructed, and inferred
@@ -129,7 +131,7 @@ src/
     codec/       .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison, diffing
   analysis/      outcomes, comparability, scoring, evidence, attempts
-  app/           selection, commands, window, frame loop
+  app/           selection, commands, replay session, window, frame loop
   render/        draw lists, primitives, batching, fonts, WGPU backend
   ui/            viewport transforms, virtualization, timeline, inspector, diff
   export/        bundle assembly, HTML report, canonical JSON
@@ -142,7 +144,7 @@ tests/
   export/  encoding, injection resistance, and determinism
   render/  draw list culling, clipping, batching, glyph atlases
   ui/      transform inverses, virtualization, and drawn output
-  app/     command routing, keyboard bindings, and playback
+  app/     command routing, keyboard bindings, playback, playhead replay
 spike/    throwaway phase-zero validation programs
 scripts/  repeatable developer commands
 ```
@@ -186,5 +188,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-324 tests across nine packages. See [Quality](docs/09-quality.md) for the
+334 tests across nine packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.

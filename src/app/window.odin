@@ -10,6 +10,7 @@ import "vendor:wgpu/sdl3glue"
 import "src:analysis"
 import "src:core"
 import "src:render"
+import "src:replay"
 import "src:trace/codec"
 import "src:trace/model"
 import "src:ui"
@@ -268,6 +269,13 @@ run :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 	// once rather than per frame.
 	outcomes := analysis.build_outcome_index(trace)
 	defer analysis.outcome_index_destroy(&outcomes)
+
+	// Replay for the open trace. A trace with no mutations has nothing to
+	// reconstruct, which the diff panel reports rather than treating as a
+	// failure to open.
+	session: Replay_Session
+	replay_session_init(&session, trace)
+	defer replay_session_destroy(&session)
 	if !load_fonts(window) {
 		fmt.eprintln("norn: no usable font was found; the timeline will draw without labels")
 	}
@@ -299,7 +307,7 @@ run :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 			continue
 		}
 
-		draw_frame(window, state, trace, index, &outcomes)
+		draw_frame(window, state, trace, index, &outcomes, &session)
 		window.drawn_revision = state.revision
 		window.needs_redraw = false
 	}
@@ -532,7 +540,14 @@ draw_frame :: proc(
 	trace: ^codec.Trace,
 	index: ui.Timeline_Index,
 	outcomes: ^analysis.Outcome_Index,
+	session: ^Replay_Session,
 ) {
+	// docs/01: dragging the playhead updates the virtual repository and all
+	// derived panels. Seeking here, before any panel reads it, is what keeps
+	// the diff and the timeline describing the same moment.
+	if state.selection.has_playhead {
+		seek_to(session, trace, state.selection.playhead_ns)
+	}
 	// 4. Visible-data query.
 	set := ui.query_visible(trace, index, state.viewport, state.lanes)
 	defer ui.visible_set_destroy(&set)
@@ -604,7 +619,7 @@ draw_frame :: proc(
 	}
 
 	if diff_visible(window) {
-		draw_diff_panel(window, state, trace, atlas, heading)
+		draw_diff_panel(window, state, trace, session, heading)
 	}
 
 	// 7. GPU batching.
@@ -658,43 +673,52 @@ draw_frame :: proc(
 
 // draw_diff_panel renders the file content for the focused path.
 //
-// The panel shows the state the replay engine produced and nothing else. When
-// no file is focused it says so rather than guessing at one, because picking a
-// file the user did not select would present arbitrary content as the subject
-// of their investigation.
+// The panel shows what the replay engine produced and nothing else. docs/01
+// forbids filling a gap with an unlabelled substitution, so every state the
+// engine can report — a gap, a deletion, unverified content — is passed
+// through rather than smoothed over.
 @(private)
 draw_diff_panel :: proc(
 	window: ^Window,
 	state: ^State,
 	trace: ^codec.Trace,
-	atlas: ^render.Atlas,
+	session: ^Replay_Session,
 	heading: ^render.Atlas,
 ) {
 	bounds := diff_bounds(window)
 	panel := ui.Diff_Panel_State {
-		bounds  = bounds,
-		theme   = ui.DARK_DIFF,
-		fonts   = &window.fonts if window.fonts_loaded else nil,
-		mono    = window.mono_atlas,
-		heading = heading,
-		scale   = window.scale,
+		bounds       = bounds,
+		theme        = ui.DARK_DIFF,
+		fonts        = &window.fonts if window.fonts_loaded else nil,
+		mono         = window.mono_atlas,
+		heading      = heading,
+		scale        = window.scale,
 		scroll_lines = state.diff_scroll_lines,
 	}
 
-	content := ui.Diff_Content {
-		mode   = .At_Playhead,
-		status = .Unknown_Path,
+	// No focused file means no subject. Picking one would present arbitrary
+	// content as the thing the user is investigating.
+	if state.selection.focus_kind != .Entity {
+		ui.draw_diff(
+			&window.list,
+			panel,
+			ui.Diff_Content{mode = .At_Playhead, status = .Unknown_Path},
+		)
+		return
 	}
 
-	if state.selection.focus_kind == .Entity {
-		content.path = entity_path(trace, state.selection.focus_entity)
+	path := state.selection.focus_entity
+	resolved := resolve_path(session, path)
 
-		// Replay is not yet driven by the playhead in the frame loop; until it
-		// is, the panel reports that it has nothing rather than showing stale
-		// or invented content. docs/01 forbids filling a gap with a
-		// substitution that is not labelled, and an unlabelled guess here
-		// would be exactly that.
-		content.status = .Unknown_Path
+	content := ui.Diff_Content {
+		path      = entity_path(trace, path),
+		mode      = .At_Playhead,
+		status    = resolved.status,
+		gap_event = u64(resolved.gap_event),
+	}
+
+	if replay.has_content(resolved) {
+		content.lines = replay.split_lines(resolved.content, context.temp_allocator)
 	}
 
 	ui.draw_diff(&window.list, panel, content)
