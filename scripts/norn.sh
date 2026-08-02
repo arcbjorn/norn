@@ -26,6 +26,7 @@ Commands:
   run [arguments]     Build in debug and run the executable
   test [package]      Run tests for one package, or every package
   fixture <tier> [out] Generate an NSL fixture (tiny|representative|reference|stress)
+  bench <trace.norn>  Measure replay seek and reconstruction latency
   check               Type-check every package without producing binaries
   format-check        Verify formatting is unchanged
   spike <name> [args]  Build and run a phase-zero spike (graphics)
@@ -114,6 +115,24 @@ cmd_fixture() {
 		-out:"${ARTIFACTS_DIR}/genfixture"
 	local out="${2:-${ARTIFACTS_DIR}/${tier}.jsonl}"
 	"${ARTIFACTS_DIR}/genfixture" "${tier}" "${out}"
+}
+
+# Benchmarks. docs/09 lists replay seek latency among the measurements a release
+# needs, and docs/11 makes reference-fixture seek a Phase 2 exit criterion.
+cmd_bench() {
+	require_odin
+	mkdir -p "${ARTIFACTS_DIR}"
+	local trace="${1:-}"
+	if [[ -z "${trace}" ]]; then
+		echo "error: bench requires a .norn trace" >&2
+		echo "  scripts/norn.sh fixture reference && norn import ..." >&2
+		return 2
+	fi
+	# Release build: the budgets in docs/00 and docs/07 apply to what ships, and
+	# a debug measurement would report a number no user experiences.
+	odin build "${ROOT}/src/tools/bench" "${COLLECTION[@]}" -o:speed \
+		-out:"${ARTIFACTS_DIR}/bench"
+	"${ARTIFACTS_DIR}/bench" "${trace}"
 }
 
 cmd_run() {
@@ -220,6 +239,7 @@ main() {
 		build)        cmd_build "$@" ;;
 		run)          cmd_run "$@" ;;
 		fixture)      cmd_fixture "$@" ;;
+		bench)        cmd_bench "$@" ;;
 		test)         cmd_test "$@" ;;
 		check)        cmd_check "$@" ;;
 		format-check) cmd_format_check "$@" ;;
