@@ -399,6 +399,7 @@ pump_events :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 			if key == .None {
 				continue
 			}
+			was_open := state.search_open
 			command := command_for_key(
 				key,
 				translate_modifiers(event.key.mod),
@@ -406,6 +407,35 @@ pump_events :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 				state.search_open,
 			)
 			apply(state, trace, command)
+
+			// SDL only delivers TEXT_INPUT while text input is started, and
+			// starting it is what lets the platform run an input method. Kept
+			// in step with the panel here rather than at the command layer,
+			// which knows nothing about SDL.
+			if state.search_open != was_open {
+				// The result is ignored deliberately. If the platform refuses
+				// to start text input the field cannot be typed into, but the
+				// filter chips still work — and failing to open search at all
+				// would remove those too.
+				if state.search_open {
+					_ = sdl.StartTextInput(window.handle)
+				} else {
+					_ = sdl.StopTextInput(window.handle)
+				}
+			}
+
+		case .TEXT_INPUT:
+			// Decoded by the platform, so this receives characters rather than
+			// scancodes: a layout that produces `/` on a different physical key
+			// still types the right thing, and an input method can deliver
+			// several characters at once.
+			if state.search_open && event.text.text != nil {
+				apply(
+					state,
+					trace,
+					Command{kind = .Search_Append, text = string(event.text.text)},
+				)
+			}
 
 		case .WINDOW_PIXEL_SIZE_CHANGED:
 			handle_resize(window, state)
@@ -579,6 +609,7 @@ translate_key :: proc "contextless" (scancode: sdl.Scancode) -> Key {
 	case .SLASH:         return .Slash
 	case .N:             return .N
 	case .RETURN:        return .Return
+	case .BACKSPACE:     return .Backspace
 	case .PAGEUP:        return .Page_Up
 	case .PAGEDOWN:      return .Page_Down
 	case ._1:            return .Digit_1

@@ -1,5 +1,7 @@
 package app
 
+import "base:runtime"
+
 import "src:core"
 import "src:trace/codec"
 import "src:trace/model"
@@ -55,6 +57,8 @@ Command_Kind :: enum u8 {
 	Search_Set_Text,
 	Search_Next,
 	Search_Previous,
+	Search_Append,
+	Search_Backspace,
 	Search_Toggle_Kind,
 	Search_Toggle_Failed_Only,
 	Search_Scope_To_Focus,
@@ -134,6 +138,7 @@ Key :: enum u8 {
 	Slash,
 	N,
 	Return,
+	Backspace,
 }
 
 // command_for_key translates a keystroke into a command.
@@ -150,6 +155,25 @@ command_for_key :: proc(
 	// and search is the outermost, so the binding depends on it.
 	search_open := false,
 ) -> Command {
+	// An open search field owns the keyboard for anything a user could be
+	// typing. Otherwise `n` in a filename would jump to the next match and `d`
+	// would cycle the diff panel, which makes the field unusable — and the
+	// symptom would look like dropped keystrokes rather than a binding
+	// conflict.
+	//
+	// The exceptions are the keys that cannot be part of a query: arrows and
+	// brackets still navigate, Escape closes, Return steps to the next match.
+	// docs/01's keyboard table stays available for everything that is not text.
+	if search_open && consumed_by_field(key, modifiers) {
+		if key == .Backspace {
+			return Command{kind = .Search_Backspace}
+		}
+		// Every other printable key arrives separately as decoded text, so the
+		// key event itself does nothing. Swallowing it here is what stops `n`
+		// in a filename from also stepping to the next match.
+		return Command{kind = .None}
+	}
+
 	#partial switch key {
 	case .Left:
 		if .Primary in modifiers {
@@ -196,6 +220,12 @@ command_for_key :: proc(
 		return Command{kind = .Search_Next}
 
 	case .Return:
+		// Return and Shift+Return step matches while the field has focus, which
+		// is the pairing every find-in-page uses. `N` and `Shift+N` do the same
+		// when the field is closed, where they are not characters.
+		if .Shift in modifiers {
+			return Command{kind = .Search_Previous}
+		}
 		return Command{kind = .Search_Next}
 
 	case .Escape:
@@ -493,6 +523,29 @@ apply :: proc(state: ^State, trace: ^codec.Trace, command: Command) -> (changed:
 		}
 		clear(&state.search_text)
 		append(&state.search_text, ..transmute([]byte)command.text)
+		run_search(state, trace)
+		state.revision += 1
+		return true
+
+	case .Search_Append:
+		// Appended rather than replacing the whole query: the platform delivers
+		// one decoded chunk per keystroke, and an input method can deliver
+		// several characters at once.
+		if !state.search_open || command.text == "" {
+			return false
+		}
+		append(&state.search_text, ..transmute([]byte)command.text)
+		run_search(state, trace)
+		state.revision += 1
+		return true
+
+	case .Search_Backspace:
+		if !state.search_open || len(state.search_text) == 0 {
+			return false
+		}
+		// One rune, not one byte: deleting half a multi-byte character would
+		// leave the query invalid UTF-8, and the matcher compares bytes.
+		trim_last_rune(&state.search_text)
 		run_search(state, trace)
 		state.revision += 1
 		return true
@@ -862,4 +915,57 @@ step_search :: proc(state: ^State, trace: ^codec.Trace, forward: bool) -> bool {
 search_active :: proc(state: ^State) -> bool {
 	return state.search_open &&
 		(len(state.search_text) > 0 || analysis.active_filter_count(state.search_query) > 0)
+}
+
+// consumed_by_field reports whether an open search field claims a key.
+//
+// The field owns anything a user could be typing. Without this, `n` in a
+// filename steps to the next match and `d` cycles the diff panel — and the
+// symptom reads as dropped keystrokes rather than as a binding conflict.
+//
+// The exceptions are keys that cannot appear in a query. Arrows and brackets
+// still navigate, Escape closes the field, and Return steps to the next match,
+// so docs/01's keyboard table stays available for everything that is not text.
+@(private)
+consumed_by_field :: proc(key: Key, modifiers: Modifiers) -> bool {
+	// A modified key is a shortcut, not a character. Shift is excluded from
+	// that rule because Shift+letter is how capitals are typed.
+	if .Primary in modifiers || .Control in modifiers || .Alt in modifiers {
+		return false
+	}
+
+	#partial switch key {
+	case .Backspace:
+		return true
+	case .Left, .Right, .Up, .Down, .Escape, .Return, .Home, .End, .Page_Up, .Page_Down:
+		return false
+	case .Bracket_Left, .Bracket_Right:
+		// Brackets set the comparison range, which is more useful than typing
+		// one into a query, and a user searching for a bracket is rare enough
+		// to trade away.
+		return false
+	}
+
+	// Everything else is a character the field should receive.
+	return true
+}
+
+// trim_last_rune removes the final UTF-8 sequence from a buffer.
+//
+// Byte-wise deletion would split a multi-byte character, leaving the query
+// invalid UTF-8. The matcher compares bytes, so a split sequence would silently
+// stop matching text the user could still see in the field.
+@(private)
+trim_last_rune :: proc(buffer: ^[dynamic]u8) {
+	if len(buffer) == 0 {
+		return
+	}
+	// Continuation bytes are 10xxxxxx; walk back over them to the leading byte.
+	index := len(buffer) - 1
+	for index > 0 && (buffer[index] & 0xC0) == 0x80 {
+		index -= 1
+	}
+	// Qualified because this package defines its own `resize` for the viewport,
+	// which shadows the builtin.
+	runtime.resize_dynamic_array(buffer, index)
 }

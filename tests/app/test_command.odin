@@ -613,6 +613,19 @@ type_query :: proc(fixture: ^Fixture, text: string) -> bool {
 	)
 }
 
+// type_text delivers text the way the platform does: one decoded chunk per
+// keystroke, appended to whatever is already there.
+@(private)
+type_text :: proc(fixture: ^Fixture, text: string) {
+	for index in 0 ..< len(text) {
+		app.apply(
+			&fixture.state,
+			&fixture.trace,
+			app.Command{kind = .Search_Append, text = text[index:index + 1]},
+		)
+	}
+}
+
 @(test)
 slash_opens_search :: proc(t: ^testing.T) {
 	fixture: Fixture
@@ -649,24 +662,24 @@ stepping_matches_moves_the_global_selection :: proc(t: ^testing.T) {
 	press(&fixture, .Slash)
 	type_query(&fixture, "alpha")
 
-	press(&fixture, .N)
+	press(&fixture, .Return)
 	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(1))
 	testing.expect(t, fixture.state.selection.has_playhead, "the playhead must follow")
 
-	press(&fixture, .N)
+	press(&fixture, .Return)
 	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(3))
 
-	press(&fixture, .N)
+	press(&fixture, .Return)
 	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(5))
 
 	// Stops at the end rather than wrapping: a wrap makes a user lose track of
 	// whether they have seen every result.
-	testing.expect(t, !press(&fixture, .N))
+	testing.expect(t, !press(&fixture, .Return))
 	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(5))
 }
 
 @(test)
-shift_n_steps_backward :: proc(t: ^testing.T) {
+shift_return_steps_backward :: proc(t: ^testing.T) {
 	fixture: Fixture
 	searchable_fixture(&fixture)
 	defer fixture_destroy(&fixture)
@@ -674,11 +687,11 @@ shift_n_steps_backward :: proc(t: ^testing.T) {
 	press(&fixture, .Slash)
 	type_query(&fixture, "alpha")
 
-	press(&fixture, .N)
-	press(&fixture, .N)
+	press(&fixture, .Return)
+	press(&fixture, .Return)
 	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(3))
 
-	press(&fixture, .N, {.Shift})
+	press(&fixture, .Return, {.Shift})
 	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(1))
 }
 
@@ -691,7 +704,7 @@ escape_closes_search_before_clearing_focus :: proc(t: ^testing.T) {
 
 	press(&fixture, .Slash)
 	type_query(&fixture, "alpha")
-	press(&fixture, .N)
+	press(&fixture, .Return)
 
 	selected := fixture.state.selection.event
 
@@ -790,7 +803,7 @@ a_query_matching_nothing_selects_nothing :: proc(t: ^testing.T) {
 	type_query(&fixture, "nonexistent")
 
 	testing.expect_value(t, len(fixture.state.search_results.matches), 0)
-	testing.expect(t, !press(&fixture, .N), "stepping an empty result must do nothing")
+	testing.expect(t, !press(&fixture, .Return), "stepping an empty result must do nothing")
 	testing.expect_value(t, fixture.state.search_selected, -1)
 }
 
@@ -804,9 +817,9 @@ refining_a_query_keeps_the_cursor_in_range :: proc(t: ^testing.T) {
 
 	press(&fixture, .Slash)
 	type_query(&fixture, "alpha")
-	press(&fixture, .N)
-	press(&fixture, .N)
-	press(&fixture, .N)
+	press(&fixture, .Return)
+	press(&fixture, .Return)
+	press(&fixture, .Return)
 	testing.expect_value(t, fixture.state.search_selected, 2)
 
 	// Now only one match remains; the cursor must clamp rather than dangle.
@@ -831,4 +844,139 @@ search_state_survives_repeated_queries :: proc(t: ^testing.T) {
 	// The empty query matches everything, which is the documented filter-only
 	// behaviour rather than "no results".
 	testing.expect_value(t, len(fixture.state.search_results.matches), 5)
+}
+
+@(test)
+typed_characters_reach_the_query :: proc(t: ^testing.T) {
+	// The gap this closed: `/` opened the field and nothing could type into it.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_text(&fixture, "alpha")
+
+	testing.expect_value(t, string(fixture.state.search_text[:]), "alpha")
+	testing.expect_value(t, len(fixture.state.search_results.matches), 3)
+}
+
+@(test)
+backspace_removes_one_character :: proc(t: ^testing.T) {
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_text(&fixture, "alphax")
+	testing.expect_value(t, len(fixture.state.search_results.matches), 0)
+
+	press(&fixture, .Backspace)
+	testing.expect_value(t, string(fixture.state.search_text[:]), "alpha")
+	testing.expect_value(t, len(fixture.state.search_results.matches), 3)
+}
+
+@(test)
+backspace_deletes_a_whole_rune :: proc(t: ^testing.T) {
+	// Byte-wise deletion would split a multi-byte character and leave the query
+	// invalid UTF-8. The matcher compares bytes, so a split sequence stops
+	// matching text the user can still see in the field.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	app.apply(
+		&fixture.state,
+		&fixture.trace,
+		app.Command{kind = .Search_Append, text = "café"},
+	)
+	testing.expect_value(t, string(fixture.state.search_text[:]), "café")
+
+	press(&fixture, .Backspace)
+	testing.expect_value(t, string(fixture.state.search_text[:]), "caf")
+}
+
+@(test)
+backspace_on_an_empty_field_does_nothing :: proc(t: ^testing.T) {
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	testing.expect(t, !press(&fixture, .Backspace))
+	testing.expect_value(t, len(fixture.state.search_text), 0)
+}
+
+@(test)
+the_field_swallows_keys_that_are_characters :: proc(t: ^testing.T) {
+	// Without this, `n` in a filename steps to the next match and `d` cycles
+	// the diff panel. The symptom reads as dropped keystrokes rather than as a
+	// binding conflict, which is why it is worth asserting directly.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_text(&fixture, "alpha")
+	press(&fixture, .Return)
+	selected := fixture.state.selection.event
+	mode := fixture.state.diff_mode
+
+	// `n` would otherwise step the match; `d` would cycle the diff.
+	press(&fixture, .N)
+	press(&fixture, .D)
+
+	testing.expect_value(t, fixture.state.selection.event, selected)
+	testing.expect_value(t, fixture.state.diff_mode, mode)
+}
+
+@(test)
+navigation_keys_still_work_while_typing :: proc(t: ^testing.T) {
+	// docs/01's keyboard table stays available for everything that cannot be
+	// part of a query, or opening search would trap the user in the field.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_text(&fixture, "alpha")
+
+	testing.expect(t, press(&fixture, .Right), "arrows must still step events")
+	testing.expect(t, fixture.state.selection.event != model.NO_EVENT)
+
+	testing.expect(t, press(&fixture, .Bracket_Left), "brackets must still set the range")
+	testing.expect(t, fixture.state.selection.has_range_start)
+}
+
+@(test)
+a_modified_key_is_a_shortcut_not_a_character :: proc(t: ^testing.T) {
+	// Command+Left is "previous outcome" whether or not a field has focus.
+	// Shift is excluded from that rule, because Shift+letter is how capitals
+	// are typed.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_text(&fixture, "alpha")
+
+	before := string(fixture.state.search_text[:])
+	press(&fixture, .N, {.Primary})
+	testing.expect_value(t, string(fixture.state.search_text[:]), before)
+}
+
+@(test)
+closing_the_field_restores_the_bindings :: proc(t: ^testing.T) {
+	// The field only owns the keyboard while it is open.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_text(&fixture, "alpha")
+	press(&fixture, .Escape)
+
+	mode := fixture.state.diff_mode
+	testing.expect(t, press(&fixture, .D), "D must cycle the diff once search is closed")
+	testing.expect(t, fixture.state.diff_mode != mode)
 }
