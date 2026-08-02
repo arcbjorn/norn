@@ -191,6 +191,16 @@ See [Quality](docs/09-quality.md) for the test layers and release gates, and
 [Engineering notes](docs/13-engineering-notes.md) for measurements and the
 mistakes behind them.
 
+## License and reporting
+
+MIT — see [LICENSE](LICENSE). Third-party attributions are in
+[NOTICE.md](NOTICE.md), which must ship with any binary release.
+
+Security problems go through
+[private advisories](https://github.com/arcbjorn/norn/security/advisories/new),
+never a public issue, and never with an unredacted trace attached — see
+[SECURITY.md](SECURITY.md).
+
 ## Documentation
 
 The full specification is in [`docs/`](docs/README.md). Start with

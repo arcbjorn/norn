@@ -194,10 +194,10 @@ after `brew install odin` alone.
 | SDL3 3.4.12 | Zlib | Permissive; attribution courteous |
 | wgpu-native 29.0.1.1 | Apache-2.0 / MIT | Attribution required |
 | stb_truetype | MIT / public domain | None |
-| Odin | BSD-3-Clause | Attribution required |
+| Odin | Zlib | Notice must be retained in source distributions |
 
-Nothing is copyleft, so static linking is unproblematic. A release must ship a
-notices file, and must decide whether to bundle a font: the spike reads
+Nothing is copyleft, so static linking is unproblematic. `NOTICE.md` carries
+the required attributions and must ship with any binary release. A release and must decide whether to bundle a font: the spike reads
 `/System/Library/Fonts/SFNSMono.ttf`, which is macOS-specific and not
 redistributable.
 
