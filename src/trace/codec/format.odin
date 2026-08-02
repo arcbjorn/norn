@@ -102,6 +102,14 @@ Chunk_Kind :: enum u16 {
 	Indexes   = 11,
 	Directory = 12,
 	Footer    = 13,
+	// Concatenated blob bytes. Separate from `Blobs`, which holds only the
+	// table rows, so a reader can inspect what content exists without loading
+	// it.
+	Blob_Content = 14,
+	// Canonical file mutations. These are recorded evidence, not derived data,
+	// so the kind is required: a reader that skipped them would show a session
+	// with no repository changes rather than reporting that it cannot.
+	Mutations = 15,
 }
 
 // chunk_kind_name returns a stable identifier for CLI output and tests.
@@ -119,8 +127,10 @@ chunk_kind_name :: proc "contextless" (kind: Chunk_Kind) -> string {
 	case .Snapshots: return "snapshots"
 	case .Derived:   return "derived"
 	case .Indexes:   return "indexes"
-	case .Directory: return "directory"
-	case .Footer:    return "footer"
+	case .Directory:    return "directory"
+	case .Footer:       return "footer"
+	case .Blob_Content: return "blob_content"
+	case .Mutations:    return "mutations"
 	}
 	return "unknown"
 }
@@ -187,8 +197,10 @@ SCHEMA_ENTITIES  :: u16(1)
 SCHEMA_SPANS     :: u16(1)
 SCHEMA_EVENTS    :: u16(1)
 SCHEMA_EDGES     :: u16(1)
-SCHEMA_BLOBS     :: u16(1)
-SCHEMA_DIRECTORY :: u16(1)
+SCHEMA_BLOBS        :: u16(1)
+SCHEMA_BLOB_CONTENT :: u16(1)
+SCHEMA_MUTATIONS    :: u16(1)
+SCHEMA_DIRECTORY    :: u16(1)
 
 // Directory_Entry locates one chunk. The directory is sorted by kind then
 // ordinal, and readers locate chunks through it rather than assuming physical

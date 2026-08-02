@@ -92,12 +92,25 @@ Blob_Entry :: struct {
 
 // Blob_Table indexes blob entries by digest so that interning the same content
 // twice yields one entry.
+//
+// `content` holds the bytes of blobs added through blob_add during import. It
+// is empty for a table decoded from a trace: there, bytes stay in the mapped
+// blob chunks and are fetched on demand, because a session can reference far
+// more file content than a viewer should hold resident.
 Blob_Table :: struct {
 	entries: [dynamic]Blob_Entry,
 	// lookup keys on the digest itself, which is a fixed-size array and
 	// therefore safe to use as a map key: unlike an interned string, it does
 	// not point into a buffer that later reallocates.
 	lookup: map[Blob_Digest]Blob_Id,
+
+	// Concatenated content for blobs added during import, indexed by the
+	// entry's chunk_offset. Owned by the table.
+	content: [dynamic]u8,
+	// True when `content` holds the bytes for every entry, which is the case
+	// for a table being built by an importer and false for one read back from
+	// a trace.
+	content_resident: bool,
 }
 
 // blob_table_init prepares an empty table. Identifier zero is reserved for
@@ -105,6 +118,8 @@ Blob_Table :: struct {
 blob_table_init :: proc(table: ^Blob_Table, allocator := context.allocator) {
 	table.entries = make([dynamic]Blob_Entry, 0, 64, allocator)
 	table.lookup = make(map[Blob_Digest]Blob_Id, 64, allocator)
+	table.content = make([dynamic]u8, 0, 4096, allocator)
+	table.content_resident = true
 	append(&table.entries, Blob_Entry{})
 }
 
@@ -112,7 +127,77 @@ blob_table_init :: proc(table: ^Blob_Table, allocator := context.allocator) {
 blob_table_destroy :: proc(table: ^Blob_Table) {
 	delete(table.entries)
 	delete(table.lookup)
+	delete(table.content)
 	table^ = {}
+}
+
+// blob_add hashes `content`, stores it, and returns its identifier.
+//
+// This is the interning path importers use: it computes the digest, so callers
+// cannot accidentally register content under a hash of different bytes. Adding
+// content that is already present returns the existing identifier without
+// storing a second copy.
+blob_add :: proc(
+	table: ^Blob_Table,
+	content: []byte,
+	media_type: String_Id = EMPTY_STRING,
+	encoding: Text_Encoding = .Utf8,
+	flags: Blob_Flags = {},
+	max_count := u64(max(u32)),
+) -> (
+	id: Blob_Id,
+	ok: bool,
+) {
+	digest := digest_content(content)
+	if existing, found := table.lookup[digest]; found {
+		return existing, true
+	}
+
+	offset := u64(len(table.content))
+	append(&table.content, ..content)
+
+	return blob_intern(
+		table,
+		Blob_Entry {
+			digest = digest,
+			media_type = media_type,
+			encoding = encoding,
+			flags = flags,
+			size = u64(len(content)),
+			chunk_offset = offset,
+			stored_size = u64(len(content)),
+		},
+		max_count,
+	)
+}
+
+// blob_content returns the bytes for a blob whose content is resident.
+//
+// The result borrows the table's storage. It returns false when the identifier
+// is unknown or when the table was decoded from a trace, where content lives
+// in mapped chunks and must be fetched through the codec instead. Returning
+// false rather than empty bytes matters: empty content is a legitimate file
+// state, and confusing it with "not loaded" would let replay report a file as
+// emptied when it was merely unread.
+blob_content :: proc(table: ^Blob_Table, id: Blob_Id) -> (content: []byte, ok: bool) {
+	entry := blob_get(table, id) or_return
+	if !table.content_resident {
+		return nil, false
+	}
+	start, start_ok := checked_index(entry.chunk_offset)
+	length, length_ok := checked_index(entry.size)
+	if !start_ok || !length_ok || start + length > len(table.content) {
+		return nil, false
+	}
+	return table.content[start:start + length], true
+}
+
+@(private)
+checked_index :: proc "contextless" (value: u64) -> (result: int, ok: bool) {
+	if value > u64(max(int)) {
+		return 0, false
+	}
+	return int(value), true
 }
 
 // blob_table_count returns the number of real blobs, excluding the reserved

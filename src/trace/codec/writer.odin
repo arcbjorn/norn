@@ -29,6 +29,7 @@ Trace_Content :: struct {
 	spans:      []model.Span,
 	events:     []model.Event,
 	edges:      []model.Edge,
+	mutations:  []model.Mutation,
 }
 
 // Writer accumulates the file image in memory and tracks chunk locations for
@@ -216,7 +217,42 @@ writer_write_content :: proc(writer: ^Writer, content: ^Trace_Content) -> core.E
 		write_chunk(writer, .Edges, SCHEMA_EDGES, u32(len(content.edges)), 0, 0, scratch[:]) or_return
 	}
 
-	// Blobs. The table is written even when empty so a reader always finds the
+	// Mutations. Written before blobs only for readability of the file layout;
+	// the directory makes physical order irrelevant to readers.
+	if len(content.mutations) > 0 {
+		clear(&scratch)
+		encode_mutations(&scratch, content.mutations)
+		write_chunk(
+			writer,
+			.Mutations,
+			SCHEMA_MUTATIONS,
+			u32(len(content.mutations)),
+			0,
+			0,
+			scratch[:],
+		) or_return
+	}
+
+	// Blob content, then the blob table.
+	//
+	// This order is required: encode_blob_content rewrites each entry's
+	// location to its offset within the content payload, and the table must be
+	// serialized after those offsets are final.
+	clear(&scratch)
+	encode_blob_content(&scratch, content.blobs)
+	if len(scratch) > 0 {
+		write_chunk(
+			writer,
+			.Blob_Content,
+			SCHEMA_BLOB_CONTENT,
+			u32(model.blob_table_count(content.blobs)),
+			0,
+			0,
+			scratch[:],
+		) or_return
+	}
+
+	// The table is written even when empty so a reader always finds the
 	// reserved zero slot accounted for.
 	clear(&scratch)
 	encode_blobs(&scratch, content.blobs.entries[:])

@@ -528,10 +528,183 @@ decode_edges :: proc(
 }
 
 // ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
+
+// 8 event + 8 path + 8 old_path + 4 discriminants + 4 patch + 4 content
+// + 4 reserved + 32 before_hash + 32 after_hash.
+MUTATION_ROW_SIZE :: 104
+
+// encode_mutations writes the canonical file mutations.
+//
+// Mutations carry the before and after hashes inline rather than as blob
+// references: replay compares them on every application, and a 32-byte hash is
+// cheaper to read in place than to resolve through a table.
+encode_mutations :: proc(buffer: ^[dynamic]u8, mutations: []model.Mutation) {
+	cursor := Writer_Cursor{data = buffer}
+	write_u32(&cursor, u32(len(mutations)))
+	write_u32(&cursor, 0) // Reserved.
+	for mutation in mutations {
+		before := mutation.before_hash
+		after := mutation.after_hash
+
+		write_u64(&cursor, u64(mutation.event_id))
+		write_u64(&cursor, u64(mutation.path))
+		write_u64(&cursor, u64(mutation.old_path))
+		write_u8(&cursor, u8(mutation.op))
+		write_u8(&cursor, u8(mutation.encoding))
+		write_u8(&cursor, transmute(u8)mutation.flags)
+		write_u8(&cursor, u8(mutation.status))
+		write_u32(&cursor, u32(mutation.patch_blob))
+		write_u32(&cursor, u32(mutation.content_blob))
+		write_zeros(&cursor, 4) // Reserved.
+		write_bytes(&cursor, before[:])
+		write_bytes(&cursor, after[:])
+	}
+}
+
+decode_mutations :: proc(
+	payload: []byte,
+	out: ^[dynamic]model.Mutation,
+	limits := core.DEFAULT_LIMITS,
+) -> core.Error {
+	cursor := Reader_Cursor{data = payload}
+	count, ok := read_u32(&cursor)
+	if !ok {
+		return core.err_make(.Truncated_Input, "mutations chunk is missing its count")
+	}
+	if !skip(&cursor, 4) {
+		return core.err_make(.Truncated_Input, "mutations chunk header is truncated")
+	}
+	if err := core.check_limit(
+		u64(count),
+		limits.max_mutation_count,
+		"mutations chunk exceeds the mutation-count limit",
+	); !core.ok(err) {
+		return err
+	}
+	span, mul_ok := core.mul_u64(u64(count), MUTATION_ROW_SIZE)
+	if !mul_ok {
+		return core.err_make(.Limit_Exceeded, "mutations chunk size overflows")
+	}
+	if !core.range_within(u64(cursor.offset), span, u64(len(payload))) {
+		return core.err_make(.Truncated_Input, "mutations chunk is shorter than it declares")
+	}
+
+	for _ in 0 ..< int(count) {
+		mutation: model.Mutation
+		raw64: u64
+		raw32: u32
+		raw8: u8
+
+		raw64, _ = read_u64(&cursor); mutation.event_id = model.Event_Id(raw64)
+		raw64, _ = read_u64(&cursor); mutation.path = model.Entity_Id(raw64)
+		raw64, _ = read_u64(&cursor); mutation.old_path = model.Entity_Id(raw64)
+		raw8, _ = read_u8(&cursor); mutation.op = model.Mutation_Op(raw8)
+		raw8, _ = read_u8(&cursor); mutation.encoding = model.Text_Encoding(raw8)
+		raw8, _ = read_u8(&cursor); mutation.flags = transmute(model.Mutation_Flags)raw8
+		raw8, _ = read_u8(&cursor); mutation.status = model.Replay_Status(raw8)
+		raw32, _ = read_u32(&cursor); mutation.patch_blob = model.Blob_Id(raw32)
+		raw32, _ = read_u32(&cursor); mutation.content_blob = model.Blob_Id(raw32)
+		_ = skip(&cursor, 4)
+
+		before, _ := read_bytes(&cursor, 32)
+		copy(mutation.before_hash[:], before)
+		after, _ := read_bytes(&cursor, 32)
+		copy(mutation.after_hash[:], after)
+
+		append(out, mutation)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Blobs
 // ---------------------------------------------------------------------------
 
 BLOB_ROW_SIZE :: 64
+
+// encode_blob_content writes the concatenated bytes of every resident blob and
+// rewrites each entry's location to point into that payload.
+//
+// Content lives in its own chunk kind rather than inside the blob table so a
+// reader can load the table — enough to answer "what content does this trace
+// reference and how big is it" — without paging in file bytes it may never
+// display. docs/04 also requires blob compression to be independent per blob;
+// storing them contiguously here keeps that option open without forcing it.
+encode_blob_content :: proc(buffer: ^[dynamic]u8, table: ^model.Blob_Table) {
+	cursor := Writer_Cursor{data = buffer}
+	if !table.content_resident {
+		// Nothing to write; entries keep the locations they were decoded with.
+		return
+	}
+
+	// Each entry's source range is read before any entry is rewritten.
+	//
+	// Reading and rewriting in one pass would be wrong: blob_content resolves
+	// bytes through entry.chunk_offset, so rewriting entry N's offset changes
+	// where entry N+1 appears to live, and every later blob would be written
+	// from the wrong bytes.
+	Source :: struct {
+		offset: u64,
+		size:   u64,
+	}
+	sources := make([]Source, len(table.entries), context.temp_allocator)
+	defer delete(sources, context.temp_allocator)
+	for index in 1 ..< len(table.entries) {
+		entry := table.entries[index]
+		sources[index] = Source{offset = entry.chunk_offset, size = entry.size}
+	}
+
+	for index in 1 ..< len(table.entries) {
+		source := sources[index]
+		start, start_ok := core.to_int(source.offset)
+		length, length_ok := core.to_int(source.size)
+		if !start_ok || !length_ok || start + length > len(table.content) {
+			continue
+		}
+		content := table.content[start:start + length]
+
+		// The entry's location is rewritten to its offset within this payload,
+		// which is what the reader will index by.
+		entry := &table.entries[index]
+		entry.chunk_offset = u64(len(buffer))
+		entry.stored_size = u64(len(content))
+		write_bytes(&cursor, content)
+	}
+}
+
+// blob_content_from_chunk returns one blob's bytes from a decoded content
+// chunk payload, verifying the digest before the content is treated as usable.
+//
+// docs/04: the reader verifies the digest after decompression before treating
+// content as replay-verified. A mismatch is reported rather than repaired,
+// because the recorded hash is the evidence and the bytes are the suspect.
+blob_content_from_chunk :: proc(
+	payload: []byte,
+	entry: model.Blob_Entry,
+) -> (
+	content: []byte,
+	err: core.Error,
+) {
+	start, start_ok := core.to_int(entry.chunk_offset)
+	length, length_ok := core.to_int(entry.size)
+	if !start_ok || !length_ok {
+		return nil, core.err_make(.Malformed_Container, "blob location is not addressable")
+	}
+	if !core.range_within(entry.chunk_offset, entry.size, u64(len(payload))) {
+		return nil, core.err_make(.Truncated_Input, "blob extends past its content chunk")
+	}
+
+	content = payload[start:start + length]
+	if !model.digest_equal(model.digest_content(content), entry.digest) {
+		return nil, core.err_make(
+			.Checksum_Mismatch,
+			"blob content does not match its recorded digest",
+		)
+	}
+	return content, nil
+}
 
 encode_blobs :: proc(buffer: ^[dynamic]u8, entries: []model.Blob_Entry) {
 	cursor := Writer_Cursor{data = buffer}

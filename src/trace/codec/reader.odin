@@ -34,12 +34,17 @@ Trace :: struct {
 	directory: [dynamic]Directory_Entry,
 	metadata:  Session_Metadata,
 
-	strings:  model.String_Table,
-	blobs:    model.Blob_Table,
-	entities: [dynamic]model.Entity,
-	spans:    [dynamic]model.Span,
-	events:   [dynamic]model.Event,
-	edges:    [dynamic]model.Edge,
+	strings:   model.String_Table,
+	blobs:     model.Blob_Table,
+	entities:  [dynamic]model.Entity,
+	spans:     [dynamic]model.Span,
+	events:    [dynamic]model.Event,
+	edges:     [dynamic]model.Edge,
+	mutations: [dynamic]model.Mutation,
+
+	// Payload of the blob content chunk, borrowed from `data`. Blob bytes are
+	// resolved out of this on demand rather than copied at open time.
+	blob_content: []byte,
 }
 
 trace_destroy :: proc(trace: ^Trace) {
@@ -50,7 +55,34 @@ trace_destroy :: proc(trace: ^Trace) {
 	delete(trace.spans)
 	delete(trace.events)
 	delete(trace.edges)
+	delete(trace.mutations)
 	trace^ = {}
+}
+
+// trace_blob_content returns a blob's bytes, verifying the digest first.
+//
+// The result borrows the trace's mapped data and stays valid as long as the
+// trace is open. A blob whose bytes were never stored returns false with a
+// Not_Found category, which replay reports as missing evidence rather than as
+// an empty file.
+trace_blob_content :: proc(
+	trace: ^Trace,
+	id: model.Blob_Id,
+) -> (
+	content: []byte,
+	err: core.Error,
+) {
+	if id == model.NO_BLOB {
+		return nil, core.err_make(.Invalid_Argument, "no blob was referenced")
+	}
+	entry, found := model.blob_get(&trace.blobs, id)
+	if !found {
+		return nil, core.err_make(.Invalid_Reference, "trace names a blob that does not exist")
+	}
+	if trace.blob_content == nil {
+		return nil, core.err_make(.Not_Found, "trace stores no blob content")
+	}
+	return blob_content_from_chunk(trace.blob_content, entry)
 }
 
 // read_directory parses the header, footer, and directory without decoding any
@@ -238,8 +270,19 @@ open_trace :: proc(
 		case .Edges:
 			decode_edges(payload, &trace.edges, limits) or_return
 
+		case .Mutations:
+			decode_mutations(payload, &trace.mutations, limits) or_return
+
+		case .Blob_Content:
+			// Borrowed, not copied: replay resolves individual blobs out of
+			// this payload and verifies each digest at that point.
+			trace.blob_content = payload
+
 		case .Blobs:
 			decode_blobs(payload, &trace.blobs, limits) or_return
+			// Content read back from a trace is not resident in the table; it
+			// is fetched through trace_blob_content instead.
+			trace.blobs.content_resident = false
 
 		case .Directory, .Footer:
 			// Already handled by read_directory.
@@ -484,6 +527,58 @@ validate_invariants :: proc(trace: ^Trace) -> core.Error {
 			return core.err_record(
 				.Invariant_Violation,
 				"edge confidence exceeds the fixed-point scale",
+				u64(index),
+			)
+		}
+	}
+
+	// Invariant 6: mutations for one path have a deterministic order.
+	//
+	// Mutations are stored in event order, so per-path order follows from the
+	// event order already checked above. What must be verified is that each
+	// mutation names a real event and path, and that a rename names the path
+	// it moved from — a rename missing its source would silently become a
+	// create, inventing content identity the trace never recorded.
+	previous_event := model.Event_Id(0)
+	for mutation, index in trace.mutations {
+		if mutation.event_id == model.NO_EVENT ||
+		   u64(mutation.event_id) > u64(len(trace.events)) {
+			return core.err_record(
+				.Invalid_Reference,
+				"mutation names an event that does not exist",
+				u64(index),
+			)
+		}
+		if mutation.event_id <= previous_event {
+			return core.err_record(
+				.Invariant_Violation,
+				"mutations must be stored in strictly increasing event order",
+				u64(index),
+			)
+		}
+		previous_event = mutation.event_id
+
+		if mutation.path == model.NO_ENTITY || u64(mutation.path) > u64(len(trace.entities)) {
+			return core.err_record(
+				.Invalid_Reference,
+				"mutation names a path entity that does not exist",
+				u64(index),
+			)
+		}
+		if mutation.op == .Rename {
+			if mutation.old_path == model.NO_ENTITY ||
+			   u64(mutation.old_path) > u64(len(trace.entities)) {
+				return core.err_record(
+					.Invariant_Violation,
+					"a rename must name the path it moved from",
+					u64(index),
+				)
+			}
+		}
+		if u32(mutation.patch_blob) > blob_count || u32(mutation.content_blob) > blob_count {
+			return core.err_record(
+				.Invalid_Reference,
+				"mutation names a blob that does not exist",
 				u64(index),
 			)
 		}

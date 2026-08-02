@@ -108,16 +108,16 @@ make_fixture :: proc(fixture: ^Fixture) {
 	)
 
 	// A blob standing in for the edited file's content.
+	//
+	// blob_add rather than blob_intern: the bytes must actually be stored, or
+	// the trace would record that content exists while carrying none of it,
+	// and replay would find nothing to reconstruct from.
 	content_bytes := transmute([]byte)string("package parser\n")
-	digest := model.digest_content(content_bytes)
-	content_blob, _ := model.blob_intern(
+	content_blob, _ := model.blob_add(
 		&fixture.blobs,
-		model.Blob_Entry {
-			digest = digest,
-			media_type = intern(fixture, "text/plain"),
-			encoding = .Utf8,
-			size = u64(len(content_bytes)),
-		},
+		content_bytes,
+		intern(fixture, "text/plain"),
+		.Utf8,
 	)
 
 	append(
