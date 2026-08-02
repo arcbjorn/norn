@@ -163,3 +163,24 @@ Severity :: enum u8 {
 	Error   = 4,
 	Fatal   = 5,
 }
+
+// Baseline_Entry records one path observed before the session began.
+//
+// docs/06: "the baseline manifest records every path whose absence or content
+// was actually verified. It must not imply that unobserved paths were absent."
+// Absence is therefore an explicit entry with `exists` false, not the default —
+// a path missing from the manifest means nothing was observed about it, which
+// is a different claim from the file not being there.
+//
+// Defined here rather than in the replay package so the codec and the engine
+// share one definition. Two structs that had to agree byte for byte would
+// eventually disagree.
+Baseline_Entry :: struct {
+	path:     Entity_Id,
+	content:  Blob_Id,
+	exists:   bool,
+	encoding: Text_Encoding,
+	// Digest of the observed content, so replay can verify a reconstruction
+	// against what was actually read rather than trusting the blob table.
+	digest: Blob_Digest,
+}

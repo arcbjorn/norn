@@ -110,6 +110,12 @@ Chunk_Kind :: enum u16 {
 	// so the kind is required: a reader that skipped them would show a session
 	// with no repository changes rather than reporting that it cannot.
 	Mutations = 15,
+	// Baseline manifest: the repository content observed before the session
+	// began. docs/06 requires it to record only paths whose content or absence
+	// was actually verified, so it is a recorded observation rather than
+	// derived data, and a reader that skipped it would replay from nothing and
+	// report gaps for files it could have reconstructed.
+	Baseline = 16,
 }
 
 // chunk_kind_name returns a stable identifier for CLI output and tests.
@@ -131,6 +137,7 @@ chunk_kind_name :: proc "contextless" (kind: Chunk_Kind) -> string {
 	case .Footer:       return "footer"
 	case .Blob_Content: return "blob_content"
 	case .Mutations:    return "mutations"
+	case .Baseline:     return "baseline"
 	}
 	return "unknown"
 }
@@ -202,6 +209,7 @@ SCHEMA_BLOB_CONTENT :: u16(1)
 SCHEMA_MUTATIONS    :: u16(1)
 SCHEMA_PAYLOADS     :: u16(1)
 SCHEMA_DIRECTORY    :: u16(1)
+SCHEMA_BASELINE     :: u16(1)
 
 // Directory_Entry locates one chunk. The directory is sorted by kind then
 // ordinal, and readers locate chunks through it rather than assuming physical

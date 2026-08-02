@@ -31,6 +31,10 @@ Trace_Content :: struct {
 	edges:      []model.Edge,
 	mutations:  []model.Mutation,
 	payloads:   ^model.Payload_Tables,
+	// Repository content observed before the session began. Empty when the
+	// importer captured no baseline, which docs/06 treats as a legitimate
+	// state rather than an error.
+	baseline: []model.Baseline_Entry,
 }
 
 // Writer accumulates the file image in memory and tracks chunk locations for
@@ -246,6 +250,23 @@ writer_write_content :: proc(writer: ^Writer, content: ^Trace_Content) -> core.E
 			.Mutations,
 			SCHEMA_MUTATIONS,
 			u32(len(content.mutations)),
+			0,
+			0,
+			scratch[:],
+		) or_return
+	}
+
+	// Baseline manifest. Before blobs for the same reason as mutations: it
+	// references blob identifiers, and reading the manifest first tells a
+	// reader what content it will need.
+	if len(content.baseline) > 0 {
+		clear(&scratch)
+		encode_baseline(&scratch, content.baseline)
+		write_chunk(
+			writer,
+			.Baseline,
+			SCHEMA_BASELINE,
+			u32(len(content.baseline)),
 			0,
 			0,
 			scratch[:],

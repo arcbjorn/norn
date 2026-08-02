@@ -1015,3 +1015,106 @@ decode_blobs :: proc(
 	}
 	return nil
 }
+
+// encode_baseline writes the repository baseline manifest.
+//
+// docs/06 requires the manifest to record only what was actually verified, so
+// every entry states explicitly whether the path existed. A reader must be able
+// to distinguish "observed absent" from "not observed", and a bare list of
+// present files could not express the first.
+//
+// The digest is stored inline for the same reason mutation hashes are: replay
+// verifies against it on every load, and a 32-byte compare beats resolving a
+// table row.
+encode_baseline :: proc(buffer: ^[dynamic]u8, entries: []model.Baseline_Entry) {
+	cursor := Writer_Cursor{data = buffer}
+	write_u32(&cursor, u32(len(entries)))
+	write_u32(&cursor, 0) // Reserved.
+	for entry in entries {
+		digest := entry.digest
+		write_u64(&cursor, u64(entry.path))
+		write_u32(&cursor, u32(entry.content))
+		write_u8(&cursor, entry.exists ? 1 : 0)
+		write_u8(&cursor, u8(entry.encoding))
+		write_zeros(&cursor, 2) // Reserved.
+		write_bytes(&cursor, digest[:])
+	}
+}
+
+decode_baseline :: proc(
+	payload: []byte,
+	out: ^[dynamic]model.Baseline_Entry,
+	limits := core.DEFAULT_LIMITS,
+) -> core.Error {
+	cursor := Reader_Cursor{data = payload}
+	count, ok := read_u32(&cursor)
+	if !ok {
+		return core.err_make(.Truncated_Input, "baseline chunk is missing its count")
+	}
+	if !skip(&cursor, 4) {
+		return core.err_make(.Truncated_Input, "baseline chunk header is truncated")
+	}
+	// Bounded by the entity limit: a baseline entry names a path entity, so a
+	// manifest larger than the entity table cannot be well formed.
+	if err := core.check_limit(
+		u64(count),
+		limits.max_entity_count,
+		"baseline chunk exceeds the entity-count limit",
+	); !core.ok(err) {
+		return err
+	}
+
+	reserve(out, int(count))
+	for index in 0 ..< int(count) {
+		entry: model.Baseline_Entry
+
+		path, path_ok := read_u64(&cursor)
+		content, content_ok := read_u32(&cursor)
+		exists, exists_ok := read_u8(&cursor)
+		encoding, encoding_ok := read_u8(&cursor)
+		if !path_ok || !content_ok || !exists_ok || !encoding_ok || !skip(&cursor, 2) {
+			return core.err_record(
+				.Truncated_Input,
+				"baseline entry is truncated",
+				u64(index),
+			)
+		}
+
+		digest, digest_ok := read_bytes(&cursor, 32)
+		if !digest_ok {
+			return core.err_record(
+				.Truncated_Input,
+				"baseline entry digest is truncated",
+				u64(index),
+			)
+		}
+
+		entry.path = model.Entity_Id(path)
+		entry.content = model.Blob_Id(content)
+		entry.exists = exists != 0
+		entry.encoding = model.Text_Encoding(encoding)
+		copy(entry.digest[:], digest)
+
+		// A present path must name content; an absent one must not. Either
+		// violation means replay would reconstruct something the session never
+		// observed, which is worse than reporting a gap.
+		if entry.exists && entry.content == model.NO_BLOB {
+			return core.err_record(
+				.Invariant_Violation,
+				"a present baseline entry names no content",
+				u64(index),
+			)
+		}
+		if !entry.exists && entry.content != model.NO_BLOB {
+			return core.err_record(
+				.Invariant_Violation,
+				"an absent baseline entry names content",
+				u64(index),
+			)
+		}
+
+		append(out, entry)
+	}
+
+	return nil
+}

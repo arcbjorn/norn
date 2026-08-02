@@ -41,6 +41,7 @@ Trace :: struct {
 	events:    [dynamic]model.Event,
 	edges:     [dynamic]model.Edge,
 	mutations: [dynamic]model.Mutation,
+	baseline:  [dynamic]model.Baseline_Entry,
 	payloads:  model.Payload_Tables,
 
 	// Payload of the blob content chunk, borrowed from `data`. Blob bytes are
@@ -57,6 +58,7 @@ trace_destroy :: proc(trace: ^Trace) {
 	delete(trace.events)
 	delete(trace.edges)
 	delete(trace.mutations)
+	delete(trace.baseline)
 	model.payload_tables_destroy(&trace.payloads)
 	trace^ = {}
 }
@@ -298,6 +300,9 @@ open_trace :: proc(
 
 		case .Mutations:
 			decode_mutations(payload, &trace.mutations, limits) or_return
+
+		case .Baseline:
+			decode_baseline(payload, &trace.baseline, limits) or_return
 
 		case .Blob_Content:
 			// Borrowed, not copied: replay resolves individual blobs out of
