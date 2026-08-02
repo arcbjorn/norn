@@ -25,6 +25,7 @@ Commands:
   build [profile]     Build the norn executable (debug|release|sanitize|profile)
   run [arguments]     Build in debug and run the executable
   test [package]      Run tests for one package, or every package
+  fixture <tier> [out] Generate an NSL fixture (tiny|representative|reference|stress)
   check               Type-check every package without producing binaries
   format-check        Verify formatting is unchanged
   spike <name> [args]  Build and run a phase-zero spike (graphics)
@@ -96,6 +97,23 @@ cmd_build() {
 	odin build "${ROOT}/src/main" "${COLLECTION[@]}" ${flags} \
 		-out:"${BUILD_DIR}/norn"
 	echo "built ${BUILD_DIR}/norn (${profile})"
+}
+
+# Fixture generation. docs/09 requires large fixtures to be generated
+# deterministically, so the generator is part of the toolchain rather than a
+# one-off script: a tier name must reproduce the same bytes on any machine.
+cmd_fixture() {
+	require_odin
+	mkdir -p "${ARTIFACTS_DIR}"
+	local tier="${1:-}"
+	if [[ -z "${tier}" ]]; then
+		echo "error: fixture requires a tier (tiny|representative|reference|stress)" >&2
+		return 2
+	fi
+	odin build "${ROOT}/src/tools/genfixture" "${COLLECTION[@]}" -o:speed \
+		-out:"${ARTIFACTS_DIR}/genfixture"
+	local out="${2:-${ARTIFACTS_DIR}/${tier}.jsonl}"
+	"${ARTIFACTS_DIR}/genfixture" "${tier}" "${out}"
 }
 
 cmd_run() {
@@ -201,6 +219,7 @@ main() {
 	case "${command}" in
 		build)        cmd_build "$@" ;;
 		run)          cmd_run "$@" ;;
+		fixture)      cmd_fixture "$@" ;;
 		test)         cmd_test "$@" ;;
 		check)        cmd_check "$@" ;;
 		format-check) cmd_format_check "$@" ;;
