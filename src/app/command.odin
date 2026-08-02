@@ -1,5 +1,6 @@
 package app
 
+import "src:core"
 import "src:trace/codec"
 import "src:trace/model"
 import "src:analysis"
@@ -46,6 +47,19 @@ Command_Kind :: enum u8 {
 	// Filters.
 	Toggle_Lane,
 
+	// Search. docs/01 requires search over event text, paths, commands,
+	// diagnostics, tools, and identifiers, with filters shown as removable
+	// chips.
+	Search_Open,
+	Search_Close,
+	Search_Set_Text,
+	Search_Next,
+	Search_Previous,
+	Search_Toggle_Kind,
+	Search_Toggle_Failed_Only,
+	Search_Scope_To_Focus,
+	Search_Clear_Filters,
+
 	// Diff panel.
 	Cycle_Diff_Mode,
 	Scroll_Diff,
@@ -70,6 +84,11 @@ Command :: struct {
 	lane: ui.Lane,
 	// Line delta for Scroll_Diff.
 	lines: int,
+	// Query text for Search_Set_Text. Borrowed for the duration of the call;
+	// the state clones what it keeps.
+	text: string,
+	// Family for Search_Toggle_Kind.
+	family: analysis.Kind_Filter,
 }
 
 // Modifiers carried by a key event.
@@ -112,6 +131,9 @@ Key :: enum u8 {
 	D,
 	Page_Up,
 	Page_Down,
+	Slash,
+	N,
+	Return,
 }
 
 // command_for_key translates a keystroke into a command.
@@ -124,6 +146,9 @@ command_for_key :: proc(
 	key: Key,
 	modifiers: Modifiers,
 	selection: Selection,
+	// Whether the search panel is open. Escape backs out one layer at a time,
+	// and search is the outermost, so the binding depends on it.
+	search_open := false,
 ) -> Command {
 	#partial switch key {
 	case .Left:
@@ -156,10 +181,33 @@ command_for_key :: proc(
 	case .F:
 		return Command{kind = .Focus_Selected}
 
+	case .Slash:
+		// docs/01 fixes the keyboard table but names no search binding, so this
+		// follows the convention every editor and pager shares. Chosen rather
+		// than invented: a user who has to look up how to search has already
+		// lost the thread they were following.
+		return Command{kind = .Search_Open}
+
+	case .N:
+		// Next and previous match, the companion convention to `/`.
+		if .Shift in modifiers {
+			return Command{kind = .Search_Previous}
+		}
+		return Command{kind = .Search_Next}
+
+	case .Return:
+		return Command{kind = .Search_Next}
+
 	case .Escape:
 		// docs/01: "Escape — clear focus, then clear range." Two presses do
 		// two different things, which is what a user expects from a key that
-		// backs out of state one layer at a time.
+		// backs out of state one layer at a time. Search is the outermost
+		// layer, so it closes first — and closing it restores the unfiltered
+		// view, because docs/01 forbids a hidden filter explaining a missing
+		// event.
+		if search_open {
+			return Command{kind = .Search_Close}
+		}
 		return Command{kind = .Clear}
 
 	case .Home:
@@ -227,6 +275,17 @@ State :: struct {
 	// Which activity categories the repository map shows.
 	map_filter: analysis.Node_Filter,
 
+	// Search. Open is separate from a non-empty query because a user who
+	// clears the box has not closed the panel, and closing it must restore the
+	// unfiltered view rather than leave a hidden filter behind — docs/01
+	// forbids a filter that silently explains a missing event.
+	search_open:     bool,
+	search_query:    analysis.Query,
+	search_results:  analysis.Results,
+	search_selected: int,
+	// Owned copy of the query text, because the caller's buffer is transient.
+	search_text: [dynamic]u8,
+
 	// Set when the user asked to quit.
 	quitting: bool,
 
@@ -239,6 +298,9 @@ State :: struct {
 // state_init prepares the application for a trace.
 state_init :: proc(state: ^State, trace: ^codec.Trace, width: f32) {
 	state.lanes = ui.ALL_LANES
+	state.search_query = analysis.query_default()
+	state.search_text = make([dynamic]u8, 0, 64)
+	state.search_selected = -1
 	state.playback.step_interval = DEFAULT_STEP_INTERVAL
 
 	start, end := session_extent(trace)
@@ -274,6 +336,17 @@ session_extent :: proc(trace: ^codec.Trace) -> (start: i64, end: i64) {
 		end = start + 1
 	}
 	return start, end
+}
+
+// state_destroy releases what the state owns.
+//
+// Only the search buffers: everything else is either borrowed from the trace or
+// a value. Added when search introduced the first owned allocation, so a viewer
+// that opens several traces in one process does not accumulate them.
+state_destroy :: proc(state: ^State) {
+	analysis.results_destroy(&state.search_results)
+	delete(state.search_text)
+	state^ = {}
 }
 
 // apply performs a command, returning whether anything changed.
@@ -390,6 +463,86 @@ apply :: proc(state: ^State, trace: ^codec.Trace, command: Command) -> (changed:
 			state.viewport.width,
 			state.viewport.origin_x,
 		)
+
+	case .Search_Open:
+		if state.search_open {
+			return false
+		}
+		state.search_open = true
+		state.revision += 1
+		return true
+
+	case .Search_Close:
+		if !state.search_open {
+			return false
+		}
+		// Closing discards the filters as well as the panel. docs/01 forbids a
+		// hidden filter explaining a missing event, and a filter that survived
+		// a closed search box is exactly that.
+		state.search_open = false
+		state.search_query = analysis.query_default()
+		clear(&state.search_text)
+		analysis.results_destroy(&state.search_results)
+		state.search_selected = -1
+		state.revision += 1
+		return true
+
+	case .Search_Set_Text:
+		if string(state.search_text[:]) == command.text {
+			return false
+		}
+		clear(&state.search_text)
+		append(&state.search_text, ..transmute([]byte)command.text)
+		run_search(state, trace)
+		state.revision += 1
+		return true
+
+	case .Search_Toggle_Kind:
+		if command.family in state.search_query.kinds {
+			state.search_query.kinds -= {command.family}
+		} else {
+			state.search_query.kinds += {command.family}
+		}
+		run_search(state, trace)
+		state.revision += 1
+		return true
+
+	case .Search_Toggle_Failed_Only:
+		state.search_query.failed_only = !state.search_query.failed_only
+		run_search(state, trace)
+		state.revision += 1
+		return true
+
+	case .Search_Scope_To_Focus:
+		// Scoping to what the user already focused is the common narrowing, and
+		// making it a command keeps the filter visible as a chip rather than an
+		// implicit consequence of the focus.
+		wanted := model.NO_ENTITY
+		if state.selection.focus_kind == .Entity {
+			wanted = state.selection.focus_entity
+		}
+		if state.search_query.path == wanted {
+			return false
+		}
+		state.search_query.path = wanted
+		run_search(state, trace)
+		state.revision += 1
+		return true
+
+	case .Search_Clear_Filters:
+		// The text survives: clearing chips is not the same as clearing the
+		// query, and a user who meant both can do both.
+		text := state.search_query.text
+		state.search_query = analysis.query_default()
+		state.search_query.text = text
+		run_search(state, trace)
+		state.revision += 1
+		return true
+
+	case .Search_Next:
+		return step_search(state, trace, forward = true)
+	case .Search_Previous:
+		return step_search(state, trace, forward = false)
 
 	case .Toggle_Lane:
 		if command.lane in state.lanes {
@@ -631,4 +784,82 @@ resize :: proc(state: ^State, width: f32) {
 		state.session_end_ns,
 	)
 	state.revision += 1
+}
+
+// run_search re-runs the query and keeps the selected result in range.
+//
+// Re-run on every change rather than incrementally narrowed: a filter can be
+// removed as well as added, and an incremental result set cannot grow back.
+@(private)
+run_search :: proc(state: ^State, trace: ^codec.Trace) {
+	analysis.results_destroy(&state.search_results)
+
+	state.search_query.text = string(state.search_text[:])
+	results, err := analysis.search(trace, state.search_query)
+	if !core.ok(err) {
+		// A failed query leaves an empty result rather than a stale one. Showing
+		// the previous matches would attribute them to the current query.
+		state.search_selected = -1
+		return
+	}
+	state.search_results = results
+
+	if len(results.matches) == 0 {
+		state.search_selected = -1
+		return
+	}
+	// Clamped rather than reset: a user refining a query expects to stay near
+	// where they were, not to jump back to the first hit on every keystroke.
+	//
+	// An unset cursor stays unset. Pre-selecting the first match here would
+	// make the first "next" press land on the *second* one, because stepping
+	// advances from wherever the cursor already is — and it would claim a
+	// selection the user has not made.
+	if state.search_selected >= len(results.matches) {
+		state.search_selected = len(results.matches) - 1
+	}
+}
+
+// step_search moves to the next or previous match and selects it.
+//
+// Selecting the event is the point: docs/01 keeps every panel synchronized to
+// the global selection, so stepping through results moves the whole workspace.
+@(private)
+step_search :: proc(state: ^State, trace: ^codec.Trace, forward: bool) -> bool {
+	count := len(state.search_results.matches)
+	if count == 0 {
+		return false
+	}
+
+	next := state.search_selected
+	if next < 0 {
+		next = 0 if forward else count - 1
+	} else {
+		next += 1 if forward else -1
+		if next < 0 || next >= count {
+			// Stops at the ends rather than wrapping. A wrap makes a user lose
+			// track of whether they have seen every result.
+			return false
+		}
+	}
+
+	state.search_selected = next
+	match := state.search_results.matches[next]
+
+	// Routed through apply rather than assigning the selection here: selecting
+	// an event also moves the playhead and clamps the viewport, and a second
+	// copy of that logic is one that drifts.
+	apply(state, trace, Command{kind = .Select_Event, event = match.event})
+	state.revision += 1
+	return true
+}
+
+// search_active reports whether a query is narrowing what the user sees.
+//
+// docs/01: filters are visible as removable chips, and "a hidden filter must
+// never explain an apparently missing event". A panel showing filtered content
+// asks this to decide whether it owes the user an explanation.
+search_active :: proc(state: ^State) -> bool {
+	return state.search_open &&
+		(len(state.search_text) > 0 || analysis.active_filter_count(state.search_query) > 0)
 }

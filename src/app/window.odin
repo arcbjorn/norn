@@ -373,7 +373,12 @@ pump_events :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 			if key == .None {
 				continue
 			}
-			command := command_for_key(key, translate_modifiers(event.key.mod), state.selection)
+			command := command_for_key(
+				key,
+				translate_modifiers(event.key.mod),
+				state.selection,
+				state.search_open,
+			)
 			apply(state, trace, command)
 
 		case .WINDOW_PIXEL_SIZE_CHANGED:
@@ -537,6 +542,9 @@ translate_key :: proc "contextless" (scancode: sdl.Scancode) -> Key {
 	case .HOME:          return .Home
 	case .END:           return .End
 	case .D:             return .D
+	case .SLASH:         return .Slash
+	case .N:             return .N
+	case .RETURN:        return .Return
 	case .PAGEUP:        return .Page_Up
 	case .PAGEDOWN:      return .Page_Down
 	case ._1:            return .Digit_1

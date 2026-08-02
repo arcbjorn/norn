@@ -2,6 +2,7 @@ package test_app
 
 import "core:testing"
 
+import "src:analysis"
 import "src:app"
 import "src:trace/codec"
 import "src:trace/model"
@@ -22,6 +23,7 @@ Fixture :: struct {
 
 @(private)
 fixture_destroy :: proc(fixture: ^Fixture) {
+	app.state_destroy(&fixture.state)
 	codec.trace_destroy(&fixture.trace)
 }
 
@@ -70,7 +72,12 @@ make_fixture :: proc(fixture: ^Fixture, count := 20) {
 
 @(private)
 press :: proc(fixture: ^Fixture, key: app.Key, modifiers: app.Modifiers = {}) -> bool {
-	command := app.command_for_key(key, modifiers, fixture.state.selection)
+	command := app.command_for_key(
+		key,
+		modifiers,
+		fixture.state.selection,
+		fixture.state.search_open,
+	)
 	return app.apply(&fixture.state, &fixture.trace, command)
 }
 
@@ -534,4 +541,294 @@ session_extent_covers_event_durations :: proc(t: ^testing.T) {
 	start, end := app.session_extent(&fixture.trace)
 	testing.expect_value(t, start, i64(0))
 	testing.expect_value(t, end, 102 * SECOND)
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+//
+// docs/01 requires search over event text, paths, commands, diagnostics, tools,
+// and identifiers, with composable filters shown as removable chips — and the
+// rule that "a hidden filter must never explain an apparently missing event."
+//
+// These cover the app layer: that the commands route, that stepping results
+// moves the global selection, and that closing search restores the unfiltered
+// view rather than leaving a filter behind that nothing displays.
+
+@(private)
+searchable_fixture :: proc(fixture: ^Fixture) {
+	t := &fixture.trace
+	model.string_table_init(&t.strings)
+	model.blob_table_init(&t.blobs)
+	model.payload_tables_init(&t.payloads)
+	t.entities = make([dynamic]model.Entity, 0, 4)
+	t.spans = make([dynamic]model.Span, 0, 2)
+	t.events = make([dynamic]model.Event, 0, 8)
+	t.edges = make([dynamic]model.Edge, 0, 2)
+	t.mutations = make([dynamic]model.Mutation, 0, 4)
+	t.directory = make([dynamic]codec.Directory_Entry, 0, 2)
+
+	intern :: proc(t: ^codec.Trace, value: string) -> model.String_Id {
+		id, _ := model.string_intern(&t.strings, value)
+		return id
+	}
+
+	append(&t.entities, model.Entity{id = 1, kind = .Path, name = intern(t, "src/main.odin")})
+	append(&t.entities, model.Entity{id = 2, kind = .Path, name = intern(t, "src/other.odin")})
+
+	summaries := []string{"alpha here", "beta here", "alpha again", "gamma", "alpha last"}
+	kinds := []model.Event_Kind {
+		.User_Message,
+		.File_Modify,
+		.User_Message,
+		.Command_Start,
+		.File_Modify,
+	}
+	entities := []model.Entity_Id{model.NO_ENTITY, 1, model.NO_ENTITY, model.NO_ENTITY, 2}
+
+	for summary, index in summaries {
+		append(
+			&t.events,
+			model.Event {
+				id = model.Event_Id(index + 1),
+				sequence = model.Sequence(index + 1),
+				kind = kinds[index],
+				flags = {.Has_Wall_Time},
+				wall_time_ns = i64(index) * SECOND,
+				primary_entity_id = entities[index],
+				summary_string_id = intern(t, summary),
+			},
+		)
+	}
+
+	app.state_init(&fixture.state, t, 1000)
+}
+
+@(private)
+type_query :: proc(fixture: ^Fixture, text: string) -> bool {
+	return app.apply(
+		&fixture.state,
+		&fixture.trace,
+		app.Command{kind = .Search_Set_Text, text = text},
+	)
+}
+
+@(test)
+slash_opens_search :: proc(t: ^testing.T) {
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	testing.expect(t, !fixture.state.search_open)
+	testing.expect(t, press(&fixture, .Slash))
+	testing.expect(t, fixture.state.search_open)
+
+	// Opening twice changes nothing, so it must not cost a redraw.
+	testing.expect(t, !press(&fixture, .Slash))
+}
+
+@(test)
+typing_a_query_produces_matches :: proc(t: ^testing.T) {
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	testing.expect(t, type_query(&fixture, "alpha"))
+	testing.expect_value(t, len(fixture.state.search_results.matches), 3)
+}
+
+@(test)
+stepping_matches_moves_the_global_selection :: proc(t: ^testing.T) {
+	// docs/01 keeps every panel synchronized to the selection, so stepping
+	// results has to move the workspace rather than just a list cursor.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_query(&fixture, "alpha")
+
+	press(&fixture, .N)
+	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(1))
+	testing.expect(t, fixture.state.selection.has_playhead, "the playhead must follow")
+
+	press(&fixture, .N)
+	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(3))
+
+	press(&fixture, .N)
+	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(5))
+
+	// Stops at the end rather than wrapping: a wrap makes a user lose track of
+	// whether they have seen every result.
+	testing.expect(t, !press(&fixture, .N))
+	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(5))
+}
+
+@(test)
+shift_n_steps_backward :: proc(t: ^testing.T) {
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_query(&fixture, "alpha")
+
+	press(&fixture, .N)
+	press(&fixture, .N)
+	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(3))
+
+	press(&fixture, .N, {.Shift})
+	testing.expect_value(t, fixture.state.selection.event, model.Event_Id(1))
+}
+
+@(test)
+escape_closes_search_before_clearing_focus :: proc(t: ^testing.T) {
+	// Escape backs out one layer at a time, and search is the outermost.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_query(&fixture, "alpha")
+	press(&fixture, .N)
+
+	selected := fixture.state.selection.event
+
+	testing.expect(t, press(&fixture, .Escape))
+	testing.expect(t, !fixture.state.search_open)
+	// The selection survives: closing the search box is not a reason to lose
+	// the event the user navigated to.
+	testing.expect_value(t, fixture.state.selection.event, selected)
+}
+
+@(test)
+closing_search_leaves_no_hidden_filter :: proc(t: ^testing.T) {
+	// docs/01: "a hidden filter must never explain an apparently missing
+	// event." A filter that outlived its panel is precisely that — nothing on
+	// screen would account for the events it removed.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_query(&fixture, "alpha")
+	app.apply(
+		&fixture.state,
+		&fixture.trace,
+		app.Command{kind = .Search_Toggle_Kind, family = .File},
+	)
+	testing.expect(t, app.search_active(&fixture.state))
+
+	press(&fixture, .Escape)
+
+	testing.expect(t, !app.search_active(&fixture.state))
+	testing.expect_value(t, fixture.state.search_query.kinds, analysis.ALL_KINDS)
+	testing.expect_value(t, len(fixture.state.search_results.matches), 0)
+}
+
+@(test)
+toggling_a_family_narrows_and_restores :: proc(t: ^testing.T) {
+	// Chips are removable, so every filter must be reversible in place.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_query(&fixture, "here")
+	testing.expect_value(t, len(fixture.state.search_results.matches), 2)
+
+	// Remove conversation, leaving only the file event.
+	app.apply(
+		&fixture.state,
+		&fixture.trace,
+		app.Command{kind = .Search_Toggle_Kind, family = .Conversation},
+	)
+	testing.expect_value(t, len(fixture.state.search_results.matches), 1)
+	testing.expect(t, fixture.state.search_results.excluded_by_kind > 0)
+
+	// Put it back.
+	app.apply(
+		&fixture.state,
+		&fixture.trace,
+		app.Command{kind = .Search_Toggle_Kind, family = .Conversation},
+	)
+	testing.expect_value(t, len(fixture.state.search_results.matches), 2)
+}
+
+@(test)
+clearing_filters_keeps_the_query_text :: proc(t: ^testing.T) {
+	// Clearing chips is not the same as clearing the search, and a user who
+	// meant both can do both.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_query(&fixture, "alpha")
+	app.apply(
+		&fixture.state,
+		&fixture.trace,
+		app.Command{kind = .Search_Toggle_Kind, family = .Conversation},
+	)
+	testing.expect(t, analysis.active_filter_count(fixture.state.search_query) > 0)
+
+	app.apply(&fixture.state, &fixture.trace, app.Command{kind = .Search_Clear_Filters})
+
+	testing.expect_value(t, analysis.active_filter_count(fixture.state.search_query), 0)
+	testing.expect_value(t, len(fixture.state.search_results.matches), 3)
+	testing.expect(t, fixture.state.search_open, "clearing chips must not close the panel")
+}
+
+@(test)
+a_query_matching_nothing_selects_nothing :: proc(t: ^testing.T) {
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_query(&fixture, "nonexistent")
+
+	testing.expect_value(t, len(fixture.state.search_results.matches), 0)
+	testing.expect(t, !press(&fixture, .N), "stepping an empty result must do nothing")
+	testing.expect_value(t, fixture.state.search_selected, -1)
+}
+
+@(test)
+refining_a_query_keeps_the_cursor_in_range :: proc(t: ^testing.T) {
+	// A user narrowing a query expects to stay near where they were rather than
+	// jump back to the first hit on every keystroke.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	type_query(&fixture, "alpha")
+	press(&fixture, .N)
+	press(&fixture, .N)
+	press(&fixture, .N)
+	testing.expect_value(t, fixture.state.search_selected, 2)
+
+	// Now only one match remains; the cursor must clamp rather than dangle.
+	type_query(&fixture, "alpha last")
+	testing.expect_value(t, len(fixture.state.search_results.matches), 1)
+	testing.expect_value(t, fixture.state.search_selected, 0)
+}
+
+@(test)
+search_state_survives_repeated_queries :: proc(t: ^testing.T) {
+	// Each query replaces the previous results. Retaining them would attribute
+	// stale matches to the current query, and leak besides.
+	fixture: Fixture
+	searchable_fixture(&fixture)
+	defer fixture_destroy(&fixture)
+
+	press(&fixture, .Slash)
+	for text in ([]string{"alpha", "beta", "gamma", "alpha", ""}) {
+		type_query(&fixture, text)
+	}
+
+	// The empty query matches everything, which is the documented filter-only
+	// behaviour rather than "no results".
+	testing.expect_value(t, len(fixture.state.search_results.matches), 5)
 }
