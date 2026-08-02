@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 #
-# Fetch the pinned wgpu-native release and place it where Odin's bindings
-# expect it.
+# Prepare the native libraries the graphics stack needs.
 #
-# Odin vendors a compiled wgpu-native only for Windows, so macOS and Linux
-# builds must supply their own. See docs/13-spike-results.md.
+# Two obligations, both documented in docs/13-spike-results.md:
 #
-# The Homebrew package is deliberately not used: its build reports version
-# 0.0.0.0 from wgpuGetVersion(), which Odin's bindings reject with a version
-# mismatch panic even when the formula version matches.
+#   1. Odin vendors a compiled wgpu-native only for Windows, so macOS and Linux
+#      builds must supply their own. The Homebrew package is deliberately not
+#      used: its build reports version 0.0.0.0 from wgpuGetVersion(), which
+#      Odin's bindings reject even when the formula version matches.
+#
+#   2. Odin ships stb as C sources that must be compiled before
+#      vendor:stb/truetype will link.
+#
+# Both write into the Odin installation rather than the project tree, so this
+# must be re-run after upgrading Odin.
 
 set -euo pipefail
 
@@ -44,11 +49,23 @@ case "$(uname -m)" in
 		;;
 esac
 
+# --- stb -------------------------------------------------------------------
+
+if [[ -f "${ODIN_ROOT}/vendor/stb/lib/stb_truetype.a" ]]; then
+	echo "stb libraries already built"
+else
+	echo "building Odin's vendored stb libraries"
+	make -C "${ODIN_ROOT}/vendor/stb/src" >/dev/null
+	echo "built stb libraries"
+fi
+
+# --- wgpu-native -----------------------------------------------------------
+
 TARGET="wgpu-${PLATFORM}-${ARCH}-release"
 DEST="${VENDOR_DIR}/${TARGET}/lib"
 
 if [[ -f "${DEST}/libwgpu_native.a" ]]; then
-	echo "wgpu-native ${WGPU_VERSION} already present at ${DEST}"
+	echo "wgpu-native ${WGPU_VERSION} already present"
 	exit 0
 fi
 
