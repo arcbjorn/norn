@@ -435,3 +435,17 @@ the trace bytes, and fails as it should.
 
 This is the general lesson from the exercise: every security check was
 deliberately broken to confirm it fails. Three of them didn't at first.
+
+### Where the defence already was
+
+Two routes could put ill-formed text into a shared export: raw invalid bytes in
+a source log, and escaped-but-invalid sequences such as a lone `\ud800`. The
+first is the crash above, now refused at import. The second turns out to be
+handled before it becomes a problem — Odin's JSON parser normalizes a lone
+surrogate to U+FFFD during parsing, so those bytes never reach the string table.
+The export layer's `sanitize_text` is a third defence behind both.
+
+Disabling `sanitize_text` therefore did not fail the suite, which is the honest
+result rather than a gap: nothing reaches it. The check asserts the property a
+user depends on — that a shared report parses — rather than any one of the three
+mechanisms, because all three sit in code that could change.

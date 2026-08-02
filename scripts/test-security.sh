@@ -187,6 +187,7 @@ main() {
 	check_secrets
 	check_markup
 	check_memory
+	check_export_encoding
 
 	if [[ "${failed}" == 0 ]]; then
 		echo "Finished ${checks} security checks. All checks passed."
@@ -324,6 +325,68 @@ check_markup() {
 	pass_check
 	if ! grep -q "&lt;script&gt;" "${html}"; then
 		fail "hostile text was dropped rather than escaped"
+	fi
+}
+
+# check_export_encoding asserts an export is well-formed text.
+#
+# Two routes could put ill-formed text in a shared artifact: raw invalid bytes
+# in a source log, and escaped-but-invalid sequences such as a lone surrogate.
+# The first is refused at import (see the UTF-8 guard in the NSL adapter); the
+# second is normalized to U+FFFD by the JSON parser before it reaches the string
+# table, so neither currently reaches an export.
+#
+# This asserts the outcome rather than either mechanism. Both defences sit in
+# code that could change — an adapter that parsed JSON itself, or a future
+# format that interns bytes directly — and the property a user depends on is
+# simply that a report parses.
+check_export_encoding() {
+	local source="${scratch}/encoding-export.jsonl"
+	{
+		echo '{"type":"session","nsl_version":1}'
+		echo '{"type":"message","t":1,"role":"user","text":"lone \ud800 surrogate"}'
+		echo '{"type":"message","t":2,"role":"user","text":"overlong \u0000 nul"}'
+		echo '{"type":"command","t":3,"command":"echo \udfff","exit":0,"output":"\ud83d bad pair"}'
+		echo '{"type":"file","t":4,"op":"create","path":"a.odin","after":"x"}'
+	} >"${source}"
+
+	"${NORN}" import "${source}" --repo "${scratch}/repo" \
+		--out "${scratch}/encexp.norn" >/dev/null 2>&1
+	if [[ ! -f "${scratch}/encexp.norn" ]]; then
+		return
+	fi
+
+	pass_check
+	if ! "${NORN}" validate "${scratch}/encexp.norn" --mode full >/dev/null 2>&1; then
+		fail "a trace with ill-formed text did not validate"
+	fi
+
+	"${NORN}" export "${scratch}/encexp.norn" --out "${scratch}/exp-encoding" \
+		--include-messages --include-output >/dev/null 2>&1
+
+	local artifact
+	for artifact in "${scratch}/exp-encoding/export.json" "${scratch}/exp-encoding/report.html"; do
+		if [[ ! -f "${artifact}" ]]; then
+			continue
+		fi
+		pass_check
+		if ! python3 -c "
+import sys
+open(sys.argv[1],'rb').read().decode('utf-8')
+" "${artifact}" 2>/dev/null; then
+			fail "$(basename "${artifact}") is not valid UTF-8"
+		fi
+	done
+
+	# The JSON must actually parse, not merely decode.
+	if [[ -f "${scratch}/exp-encoding/export.json" ]]; then
+		pass_check
+		if ! python3 -c "
+import json,sys
+json.load(open(sys.argv[1]))
+" "${scratch}/exp-encoding/export.json" 2>/dev/null; then
+			fail "export.json does not parse as JSON"
+		fi
 	fi
 }
 
