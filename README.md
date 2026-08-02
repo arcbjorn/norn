@@ -1,0 +1,108 @@
+# Norn
+
+Norn is a native time-travel debugger for coding-agent sessions. It imports an
+agent trace, reconstructs how the repository changed, and presents prompts,
+tool calls, edits, commands, tests, and errors on one navigable timeline.
+
+The full specification lives in [`docs/`](docs/README.md). Start with
+[Product](docs/00-product.md) and [Architecture](docs/02-architecture.md).
+
+## Status
+
+Early implementation. The canonical trace model, the `.norn` container codec,
+and the `inspect` and `validate` CLI commands work. The importer, replay
+engine, analysis, and native UI are not built yet.
+
+| Area | State |
+| --- | --- |
+| Core safety (checked arithmetic, paths, limits, CRC32C) | Implemented |
+| Canonical model (events, entities, spans, edges, mutations) | Implemented |
+| String interning and content-addressed blobs | Implemented |
+| `.norn` writer, reader, and validator | Implemented |
+| `norn inspect` / `norn validate` | Implemented |
+| Codex importer | Not started |
+| Replay engine | Not started |
+| Native UI (SDL3 + WGPU) | Not started |
+
+`norn validate --mode replay` reports that it is unavailable rather than
+running a weaker check, because reporting success without verifying mutation
+chains would be worse than reporting nothing.
+
+## Requirements
+
+- Odin `dev-2026-07` (pinned in [`.odin-version`](.odin-version))
+- Clang and the macOS command-line tools
+
+SDL3 is required only once the renderer lands.
+
+```sh
+brew install odin
+```
+
+## Commands
+
+All development commands route through one script, so CI and developers invoke
+the same thing:
+
+```sh
+scripts/norn.sh build [debug|release|sanitize|profile]
+scripts/norn.sh test [package]
+scripts/norn.sh check
+scripts/norn.sh clean
+```
+
+The product CLI:
+
+```sh
+norn inspect <trace.norn> [--json]
+norn validate <trace.norn> [--mode quick|full|replay]
+```
+
+Machine-readable output goes to stdout and diagnostics to stderr, so
+`norn inspect --json` can be piped without filtering. Exit codes: `0` success,
+`2` usage, `3` unreadable input, `4` invalid trace, `5` unsupported feature.
+
+## Repository layout
+
+```text
+docs/     product and engineering specification
+src/
+  core/          checked arithmetic, errors, limits, paths, CRC32C
+  main/          CLI entry point and commands
+  trace/
+    model/       canonical semantic types, interning, blobs
+    codec/       .norn reader, writer, and validator
+tests/
+  core/    arithmetic, path safety, checksum vectors
+  model/   interning and blob identity
+  codec/   roundtrip, determinism, and corruption fixtures
+scripts/  repeatable developer commands
+```
+
+Dependencies flow inward toward `trace/model`. Circular package dependencies
+are prohibited.
+
+## Safety properties
+
+These are enforced in code and covered by tests, not merely documented:
+
+- opening a trace executes nothing and writes to no repository;
+- every length and offset from untrusted input is overflow-checked before use;
+- recorded paths are rejected unless they normalize to repository-relative
+  form, and `..` is never resolved against an earlier component;
+- checksums are verified before any structured payload is decoded;
+- an unfinalized or truncated file is refused rather than partially opened;
+- declared decompression ratios are bounded before allocation.
+
+The corruption suite asserts rejection for truncation at every byte boundary,
+invalid magic and versions, size overflow, checksum mismatch, declared
+decompression bombs, and content tampering that repaired its local checksum.
+
+## Testing
+
+```sh
+scripts/norn.sh test
+```
+
+63 tests across three packages. See [Quality](docs/09-quality.md) for the
+intended test layers and release gates.

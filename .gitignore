@@ -1,0 +1,5 @@
+build/
+artifacts/
+*.norn
+*.norn.tmp
+.DS_Store
