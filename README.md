@@ -32,6 +32,7 @@ and native UI are not built yet.
 | Codex importer | Not started |
 | Annotation overlays and bookmarks | Not started |
 | SDL3 + WGPU stack validation (decision 002) | Confirmed |
+| Text rendering and glyph atlas validation | Confirmed |
 | Native UI (timeline, panels, diff viewer) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
@@ -53,12 +54,13 @@ UI) also needs SDL3 and wgpu-native:
 
 ```sh
 brew install sdl3
-scripts/bootstrap-wgpu.sh
+scripts/bootstrap-graphics.sh
 ```
 
-`bootstrap-wgpu.sh` fetches the pinned upstream wgpu-native release. Odin does
-not vendor one for macOS, and the Homebrew package reports a version its
-bindings reject — see [Spike results](docs/13-spike-results.md).
+`bootstrap-graphics.sh` compiles Odin's vendored stb sources and fetches the
+pinned upstream wgpu-native release. Odin ships neither ready to use on macOS,
+and the Homebrew wgpu package reports a version its bindings reject — see
+[Spike results](docs/13-spike-results.md).
 
 ## Commands
 
@@ -70,6 +72,7 @@ scripts/norn.sh build [debug|release|sanitize|profile]
 scripts/norn.sh test [package]
 scripts/norn.sh check
 scripts/norn.sh spike graphics [--frames N] [--events N]
+scripts/norn.sh spike text [--frames N]
 scripts/norn.sh clean
 ```
 

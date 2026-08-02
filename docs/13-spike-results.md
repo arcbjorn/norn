@@ -87,6 +87,57 @@ why: a single frame that misses the refresh interval is a visible stutter while
 scrubbing. The measurement puts the aggregation threshold somewhere below a
 million instances per frame rather than at it.
 
+## Text rendering and glyph atlas
+
+**Verdict: stb_truetype plus a GPU atlas meets the requirements. No further
+spike is needed before building the UI.**
+
+### What the spike did
+
+Loaded a system monospace face with `vendor:stb/truetype`, rasterized printable
+ASCII into a 1024x1024 R8 coverage texture, uploaded it once, and drew a
+screenful of diff-shaped text as one draw call sampling that atlas.
+
+### Frame cost
+
+Release build. Layout means building the vertex buffer for every visible glyph
+from a cached atlas, which is the steady-state cost.
+
+| Measurement | Value | Budget |
+| --- | ---: | ---: |
+| Layout, 1,965 glyphs on screen | 0.022 ms mean, 0.042 ms worst | 8 ms |
+| Atlas build, single size (cache miss) | 0.49-0.76 ms | 50 ms |
+| Peak resident set, 3,600 frames | 110 MiB | 1 GiB |
+
+The cache-miss budget in docs/07 has roughly seventy times the headroom needed
+for one atlas, so a batch of several sizes appearing at once is still far
+inside it.
+
+### High-DPI behaviour
+
+The atlas cache is keyed by size *and* scale factor, as docs/07 requires.
+Rasterizing a 13-point face at three scales produces three distinct atlases:
+
+| Scale | Device pixels | Cell width |
+| --- | ---: | ---: |
+| 1.0x | 13 | 7 px |
+| 1.5x | 20 | 10 px |
+| 2.0x | 26 | 12 px |
+
+These are separate rasterizations, not one bitmap sampled at three sizes. That
+distinction is the whole point of including scale in the key: reusing a 1x
+atlas on a 2x display is what blurry Retina text is.
+
+Glyph origins are snapped to whole device pixels when positioned, which keeps
+stems on the pixel grid.
+
+### Correctness
+
+Measurements prove the code runs, not that it draws anything legible. The spike
+therefore also dumps rasterized coverage as text, which shows correct shapes
+with antialiased edges, a proper descender on `g`, and uniform advance across
+the monospace face (13.65 px at 26 device pixels). Ascent 21.34, descent -4.66.
+
 ## Dependency findings
 
 ### wgpu-native is not vendored for macOS
@@ -111,13 +162,33 @@ version returns `0x1D000101` and works.
 Homebrew package. The bootstrap script must fetch and place it, and the pinned
 version must match `BINDINGS_VERSION` in the Odin release being used.
 
+### Odin's stb libraries are not prebuilt
+
+`vendor:stb/truetype` and `vendor:stb/rect_pack` fail to compile until the
+vendored C sources are built:
+
+```sh
+make -C "$(odin root)/vendor/stb/src"
+```
+
+This produces universal binaries and takes a few seconds. Like the wgpu
+situation, it writes into the Odin installation rather than the project tree,
+so it must be redone after upgrading Odin. `scripts/bootstrap-graphics.sh`
+handles both.
+
 ### Licensing
 
 | Dependency | License | Distribution implication |
 | --- | --- | --- |
 | SDL3 3.4.12 | Zlib | Permissive; no attribution file required, one is courteous |
 | wgpu-native 29.0.1.1 | Apache-2.0 / MIT | Attribution required in distributed binaries |
+| stb_truetype | MIT / public domain | No obligation either way |
 | Odin | BSD-3-Clause | Attribution required |
+
+A shipped release must also decide whether to bundle a font or use system
+faces. The spike reads `/System/Library/Fonts/SFNSMono.ttf`, which is
+convenient but macOS-specific and not redistributable; Linux support will need
+either a bundled open face or per-platform font discovery.
 
 An eventual macOS release must ship a notices file covering wgpu-native and
 Odin. Neither license is copyleft, so static linking is unproblematic.
@@ -142,6 +213,11 @@ Observations from writing the spike that apply to the real renderer:
   `invalid texture`. It must skip the frame.
 - Zero-duration events need a minimum width of about one pixel or they become
   invisible and unclickable. Hit testing must use the same widened rectangle.
+- A `.ttc` font collection needs `GetFontOffsetForIndex`; passing offset zero to
+  `InitFont` is only correct for a single-face `.ttf`.
+- Odin's `%-8.0f` pads numbers with **zeros on the right**, unlike C. Every
+  left-aligned numeric column must be formatted to a string first. This
+  produced garbage in two separate spikes before being noticed.
 - First-frame cost is roughly 65 ms for shader compilation and pipeline
   creation. This is once per session, but a visible window should not appear
   before it completes.
@@ -150,10 +226,9 @@ Observations from writing the spike that apply to the real renderer:
 
 The remaining phase-zero items in docs/11 are untouched:
 
-- text rendering and glyph atlas behavior at high DPI;
-- the 30-minute stability run (only 30 seconds was measured);
+- the 30-minute stability run (only 30 seconds was measured, per spike);
 - compression codec candidates for the trace format;
 - memory-mapped columnar query performance.
 
-Text rendering is the significant one: docs/07 makes crisp text at both scales
-a requirement, and nothing here has drawn a glyph.
+None of these gate UI work. The codec items matter before the trace format is
+declared stable; the long stability run matters before release.
