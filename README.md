@@ -39,6 +39,8 @@ requirement in the adapter contract and generates the fixture tiers.
 | Importer contract, record sink, redaction | Implemented |
 | Import pipeline and repository identity capture | Implemented |
 | Repository baseline capture and replay | Implemented |
+| Baseline verification against recorded digests | Implemented |
+| Search and composable filters | Implemented |
 | NSL adapter and deterministic fixture generator | Implemented |
 | `norn import` | Implemented |
 | Codex adapter (needs real sample traces) | Not started |
@@ -136,7 +138,11 @@ plays, brackets set a comparison range, and Escape backs out one layer at a
 time. Clicking an event opens it in the inspector, which shows its attributes
 and provenance, and for an outcome the ranked evidence behind it. Focusing a file with `F`
 reconstructs its content at the playhead in the panel below, labelled with how
-much replay could verify. `D` cycles the four comparisons from
+much replay could verify. `/` opens search over event text, paths, command lines, diagnostics, tool
+arguments, and event identifiers; `N` and `Shift+N` step the matches, moving the
+whole workspace to each. Filters compose and every one reports what it removed,
+so an empty result always says whether nothing matched or a filter hid it.
+`D` cycles the four comparisons from
 [User experience](docs/01-user-experience.md): state at the playhead, since the
 previous change, since session start, and across the bracket-selected range.
 The repository map on the left shows the files a session touched, sized by
@@ -234,7 +240,7 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-476 tests across eleven packages, plus 49 CLI contract checks and 122 security
+511 tests across eleven packages, plus 49 CLI contract checks and 122 security
 checks against the hostile fixtures. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
 
