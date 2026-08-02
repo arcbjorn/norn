@@ -31,7 +31,8 @@ and native UI are not built yet.
 | `norn inspect` / `validate` / `explain` / `export` | Implemented |
 | Codex importer | Not started |
 | Annotation overlays and bookmarks | Not started |
-| Native UI (SDL3 + WGPU) | Not started |
+| SDL3 + WGPU stack validation (decision 002) | Confirmed |
+| Native UI (timeline, panels, diff viewer) | Not started |
 
 Replay currently starts from an empty baseline, because capturing a repository
 baseline is the importer's job and the importer does not exist yet. A patch
@@ -43,11 +44,21 @@ the honest result for a trace that carries no baseline.
 - Odin `dev-2026-07` (pinned in [`.odin-version`](.odin-version))
 - Clang and the macOS command-line tools
 
-SDL3 is required only once the renderer lands.
-
 ```sh
 brew install odin
 ```
+
+The CLI needs nothing further. Building the graphics spike (and eventually the
+UI) also needs SDL3 and wgpu-native:
+
+```sh
+brew install sdl3
+scripts/bootstrap-wgpu.sh
+```
+
+`bootstrap-wgpu.sh` fetches the pinned upstream wgpu-native release. Odin does
+not vendor one for macOS, and the Homebrew package reports a version its
+bindings reject — see [Spike results](docs/13-spike-results.md).
 
 ## Commands
 
@@ -58,6 +69,7 @@ the same thing:
 scripts/norn.sh build [debug|release|sanitize|profile]
 scripts/norn.sh test [package]
 scripts/norn.sh check
+scripts/norn.sh spike graphics [--frames N] [--events N]
 scripts/norn.sh clean
 ```
 
@@ -105,6 +117,7 @@ tests/
   replay/  patching, mutation chains, and seek properties
   analysis/ comparability, scoring weights, and evidence ordering
   export/  encoding, injection resistance, and determinism
+spike/    throwaway phase-zero validation programs
 scripts/  repeatable developer commands
 ```
 

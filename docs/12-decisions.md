@@ -9,7 +9,7 @@ entry, marks it superseded, and names the new decision.
 | ID | Decision | Status |
 | --- | --- | --- |
 | 001 | Use Odin for the application and core systems | Accepted |
-| 002 | Use SDL3 plus WGPU for the native frontend | Provisional |
+| 002 | Use SDL3 plus WGPU for the native frontend | Accepted |
 | 003 | Keep version one local and offline | Accepted |
 | 004 | Normalize providers into one canonical model | Accepted |
 | 005 | Use an immutable append-only `.norn` container | Accepted |
@@ -43,8 +43,15 @@ careful dependency pins and native build documentation.
 **Reason:** The pairing provides a narrow platform layer and a portable modern
 GPU API while leaving product UI under Norn's control.
 
-**Status:** Provisional until phase-zero validation proves text rendering,
-high-DPI behavior, debugging, packaging, and sustained stability on macOS.
+**Status:** Accepted. The phase-zero spike validated the pairing on macOS:
+Metal backend, high-DPI at 2.0x scale, and 0.31 ms per frame to build 100,000
+timeline instances against an 8 ms budget. See
+[Spike results](13-spike-results.md).
+
+**Consequence:** wgpu-native is not vendored for macOS by Odin and the
+Homebrew package reports a version the bindings reject, so the project must
+pin and fetch the upstream release binary itself. Text rendering at high DPI
+remains unproven and is the next spike.
 
 ## 003: local and offline
 
