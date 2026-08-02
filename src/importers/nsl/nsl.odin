@@ -2,6 +2,7 @@ package importer_nsl
 
 import "core:encoding/json"
 import "core:mem"
+import "core:mem/virtual"
 import "core:strings"
 
 import "src:core"
@@ -123,7 +124,17 @@ inspect :: proc(
 	metadata.variant = header.variant
 
 	// Counting requires reading every line, but each is parsed and released
-	// independently, so memory stays bounded by the longest record.
+	// independently, so memory stays bounded by the longest record rather than
+	// by the file. Same reasoning as the import loop: a private arena, because
+	// the caller owns context.temp_allocator and may have allocated the source
+	// from it.
+	arena: virtual.Arena
+	if arena_err := virtual.arena_init_growing(&arena); arena_err != nil {
+		return metadata, core.err_make(.Out_Of_Memory, "could not reserve parsing memory")
+	}
+	defer virtual.arena_destroy(&arena)
+	record_allocator := virtual.arena_allocator(&arena)
+
 	seen: map[string]bool
 	defer delete(seen)
 
@@ -134,7 +145,10 @@ inspect :: proc(
 		}
 		metadata.record_count += 1
 
-		value, parse_err := json.parse_string(record, allocator = context.temp_allocator)
+		// Released at the end of each iteration, so peak usage is one record.
+		defer free_all(record_allocator)
+
+		value, parse_err := json.parse_string(record, allocator = record_allocator)
 		if parse_err != nil {
 			continue
 		}
@@ -222,6 +236,8 @@ Import_State :: struct {
 	// Open tool calls by provider identifier, so a result pairs with its call
 	// using an explicit identifier rather than proximity.
 	calls: map[string]Open_Call,
+	// Owns the cloned map keys, which a map does not free on delete_key.
+	keys: [dynamic]string,
 	// The agent actor, created once so the map does not show one node per turn.
 	agent: model.Entity_Id,
 	user:  model.Entity_Id,
@@ -249,8 +265,33 @@ import_source :: proc(source: []byte, sink: ^api.Sink, options: api.Options) -> 
 	state := Import_State {
 		sink = sink,
 	}
-	state.calls = make(map[string]Open_Call, 16, context.temp_allocator)
-	defer delete(state.calls)
+	// A private arena for per-record parsing, reset after each record. Sized to
+	// start small and grow to whatever the longest record needs.
+	arena: virtual.Arena
+	if arena_err := virtual.arena_init_growing(&arena); arena_err != nil {
+		return core.err_make(.Out_Of_Memory, "could not reserve parsing memory")
+	}
+	defer virtual.arena_destroy(&arena)
+	record_allocator := virtual.arena_allocator(&arena)
+
+	// Record parsing reaches for context.temp_allocator throughout. Pointing it
+	// at the arena for the loop keeps that memory reclaimable per record without
+	// threading an allocator through every mapping procedure.
+	previous_temp := context.temp_allocator
+	context.temp_allocator = record_allocator
+	defer context.temp_allocator = previous_temp
+
+	// Not arena memory: these outlive every record, and the loop below releases
+	// the arena after each one.
+	state.calls = make(map[string]Open_Call, 16)
+	state.keys = make([dynamic]string, 0, 16)
+	defer {
+		for key in state.keys {
+			delete(key)
+		}
+		delete(state.keys)
+		delete(state.calls)
+	}
 
 	state.agent = api.add_entity(sink, .Actor_Agent, "assistant", "")
 	state.user = api.add_entity(sink, .Actor_User, "user", "")
@@ -282,6 +323,19 @@ import_source :: proc(source: []byte, sink: ^api.Sink, options: api.Options) -> 
 		sink.report.source_records += 1
 
 		import_record(&state, record)
+
+		// docs/05: "the parser is streaming. It must not load the entire source
+		// log into memory." Parsing allocates a value tree per record; without
+		// this reset that memory accumulates for the whole file and peak usage
+		// grows with the log rather than with the longest record.
+		//
+		// A private arena rather than the context's temp allocator: the caller
+		// owns that one and may well have allocated the source itself from it.
+		// Freeing another owner's memory is not this adapter's to do.
+		if u64(arena.total_reserved) > sink.report.peak_parse_bytes {
+			sink.report.peak_parse_bytes = u64(arena.total_reserved)
+		}
+		free_all(record_allocator)
 
 		state.byte_offset += u64(len(record)) + 1
 	}
@@ -456,7 +510,16 @@ import_tool_call :: proc(state: ^Import_State, object: json.Object) {
 			// one wins and the collision is recorded rather than hidden.
 			api.note_warning(sink, .Ambiguous_Pairing)
 		}
-		state.calls[call_id] = Open_Call{span = span, event = event, tool = tool}
+		// Cloned: the key points into the parsed record, and that memory is
+		// released once this record is done. The clone is owned by `keys`,
+		// because delete_key does not free a map's key.
+		owned := strings.clone(call_id)
+		append(&state.keys, owned)
+		state.calls[owned] = Open_Call {
+			span  = span,
+			event = event,
+			tool  = tool,
+		}
 	} else {
 		// Without an identifier there is nothing to pair against. docs/05 wants
 		// explicit identifiers used when available; guessing by proximity when

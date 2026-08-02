@@ -288,6 +288,18 @@ format_report :: proc(
 		}
 	}
 
+	if report.peak_parse_bytes > 0 {
+		// docs/05 requires the parser to stream. Showing the high-water mark is
+		// how a user can see that it did.
+		write(
+			&builder,
+			fmt.tprintf(
+				"\npeak parse memory: %d bytes\n",
+				report.peak_parse_bytes,
+			),
+		)
+	}
+
 	write(
 		&builder,
 		fmt.tprintf(

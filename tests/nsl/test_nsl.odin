@@ -1,5 +1,7 @@
 package test_nsl
 
+import "core:fmt"
+import "core:mem"
 import "core:strings"
 import "core:testing"
 
@@ -875,4 +877,56 @@ entities_are_shared_across_records :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect_value(t, paths, 1)
+}
+
+@(test)
+parsing_memory_does_not_grow_with_the_log :: proc(t: ^testing.T) {
+	// docs/05: "the parser is streaming. It must not load the entire source log
+	// into memory."
+	//
+	// The failure this guards against is invisible to every other test here:
+	// records still map correctly, counts still come out right, and the trace is
+	// byte-identical. Only peak parsing memory differs, which is why the sink
+	// records it. Comparing two sizes of the same log is what makes a retaining
+	// parser observable — its high-water mark tracks the file.
+	build :: proc(records: int) -> string {
+		builder := strings.builder_make(context.temp_allocator)
+		strings.write_string(&builder, HEADER)
+		strings.write_byte(&builder, '\n')
+		padding := strings.repeat("x", 512, context.temp_allocator)
+		for index in 0 ..< records {
+			// Padded, so retaining every record dwarfs the fixed block size.
+			fmt.sbprintfln(
+				&builder,
+				`{{"type":"message","t":%d,"role":"user","text":"%s"}}`,
+				index + 1,
+				padding,
+			)
+		}
+		return strings.to_string(builder)
+	}
+
+	measure :: proc(t: ^testing.T, log: string) -> u64 {
+		harness: Harness
+		begin(&harness)
+		defer finish(&harness)
+
+		err := nsl.import_source(transmute([]byte)log, &harness.sink, api.Options{})
+		testing.expect(t, core.ok(err))
+		return harness.sink.report.peak_parse_bytes
+	}
+
+	small := measure(t, build(100))
+	large := measure(t, build(4_000))
+
+	// Forty times the records, and forty times the bytes. A parser that released
+	// each record needs room for one; a parser that retained them needs room for
+	// all of them, and the two are orders of magnitude apart.
+	testing.expectf(
+		t,
+		large == small,
+		"parsing 40x the records reserved %d bytes against %d: memory must track the largest record, not the log",
+		large,
+		small,
+	)
 }

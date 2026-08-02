@@ -69,6 +69,14 @@ Import_Report :: struct {
 	repaired_timestamps: u64,
 	absent_timestamps:   u64,
 
+	// High-water mark of the adapter's per-record parsing memory.
+	//
+	// docs/05 requires the parser to stream rather than load the whole log, and
+	// that is otherwise unobservable: a retaining parser produces byte-identical
+	// output and only differs in peak memory. Recording it makes the property
+	// testable and gives an import report somewhere to show it.
+	peak_parse_bytes: u64,
+
 	capabilities: codec.Capabilities,
 }
 
