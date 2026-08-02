@@ -174,6 +174,23 @@ longer lane names were silently truncated on every high-DPI display. The box
 is now derived from the viewport origin, which the caller has already scaled,
 and a test asserts every label survives at 1x, 1.5x, and 2x.
 
+## Graph layout cost
+
+The repository map's force-directed layout runs once when a trace opens, not
+per frame. Release build, at the node budget from docs/07:
+
+| Nodes | Layout |
+| ---: | ---: |
+| 50 | 1.0 ms |
+| 100 | 4.2 ms |
+| 200 | 16.8 ms |
+| 300 | 38.1 ms |
+
+The O(n²) repulsion is what drives the curve. 38 ms once per trace is
+acceptable where 38 ms per frame would not be, which is why the layout is built
+at open time and the positions are then immutable — the arrangement docs/07
+describes as "publishes immutable position buffers".
+
 ## Dependency findings
 
 ### wgpu-native is not vendored for macOS

@@ -48,6 +48,9 @@ Window :: struct {
 	// The monospace atlas, held because the diff panel needs it every frame
 	// and the scale can change between them.
 	mono_atlas: ^render.Atlas,
+	// The repository map, borrowed from the frame loop so the input handler
+	// can hit test against the same layout the frame drew.
+	graph: ^analysis.Graph,
 
 	// Framebuffer size in pixels and the display scale that produced it.
 	width, height: f32,
@@ -80,6 +83,12 @@ DIFF_HEIGHT_FRACTION :: f32(0.38)
 
 // MINIMUM_DIFF_HEIGHT is the height below which the diff panel is hidden.
 MINIMUM_DIFF_HEIGHT :: f32(120)
+
+// MAP_WIDTH is the repository map's width in logical pixels.
+//
+// docs/01 places it on the left of the workspace. Narrower than the inspector
+// because the map is read spatially rather than as labelled rows.
+MAP_WIDTH :: f32(260)
 
 // MINIMUM_TIMELINE_WIDTH is the width below which the inspector is hidden.
 //
@@ -209,6 +218,10 @@ update_metrics :: proc(window: ^Window) {
 @(private)
 timeline_bounds :: proc(window: ^Window) -> render.Rect {
 	margin := TIMELINE_MARGIN * window.scale
+	left := margin
+	if map_visible(window) {
+		left = map_bounds(window).x1 + margin
+	}
 	right := window.width - margin
 	if inspector_visible(window) {
 		right = inspector_bounds(window).x0 - margin
@@ -217,7 +230,32 @@ timeline_bounds :: proc(window: ^Window) -> render.Rect {
 	if diff_visible(window) {
 		bottom = diff_bounds(window).y0 - margin
 	}
-	return render.Rect{x0 = margin, y0 = margin, x1 = right, y1 = bottom}
+	return render.Rect{x0 = left, y0 = margin, x1 = right, y1 = bottom}
+}
+
+// map_bounds returns the rectangle the repository map occupies.
+//
+// It stops above the diff panel rather than spanning the full height, so the
+// two do not overlap on a short window.
+@(private)
+map_bounds :: proc(window: ^Window) -> render.Rect {
+	bottom := window.height
+	if diff_visible(window) {
+		bottom = diff_bounds(window).y0
+	}
+	return render.Rect{x0 = 0, y0 = 0, x1 = MAP_WIDTH * window.scale, y1 = bottom}
+}
+
+// map_visible reports whether the window is wide enough for the map.
+//
+// The timeline is the primary surface, so it keeps its minimum width and the
+// map is the first thing dropped as the window narrows.
+@(private)
+map_visible :: proc(window: ^Window) -> bool {
+	needed :=
+		(MAP_WIDTH + INSPECTOR_WIDTH + MINIMUM_TIMELINE_WIDTH + TIMELINE_MARGIN * 4) *
+		window.scale
+	return window.width >= needed
 }
 
 // diff_bounds returns the rectangle the diff panel occupies.
@@ -270,6 +308,13 @@ run :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 	outcomes := analysis.build_outcome_index(trace)
 	defer analysis.outcome_index_destroy(&outcomes)
 
+	// The repository map. Built once per trace: docs/07 requires the layout to
+	// be deterministic for a given trace, and rebuilding it per frame would
+	// also cost the 38 ms the layout takes at the node budget.
+	graph := analysis.build_graph(trace)
+	defer analysis.graph_destroy(&graph)
+	window.graph = &graph
+
 	// Replay for the open trace. A trace with no mutations has nothing to
 	// reconstruct, which the diff panel reports rather than treating as a
 	// failure to open.
@@ -307,7 +352,7 @@ run :: proc(window: ^Window, state: ^State, trace: ^codec.Trace) {
 			continue
 		}
 
-		draw_frame(window, state, trace, index, &outcomes, &session)
+		draw_frame(window, state, trace, index, &outcomes, &session, &graph)
 		window.drawn_revision = state.revision
 		window.needs_redraw = false
 	}
@@ -380,9 +425,17 @@ select_at_pointer :: proc(
 	trace: ^codec.Trace,
 	logical_x, logical_y: f32,
 ) {
-	bounds := timeline_bounds(window)
 	x := logical_x * window.scale
 	y := logical_y * window.scale
+
+	// The map claims clicks in its own area. Focusing a file there is what
+	// gives the diff panel its subject.
+	if map_visible(window) && render.rect_contains(map_bounds(window), x, y) {
+		select_in_map(window, state, trace, x, y)
+		return
+	}
+
+	bounds := timeline_bounds(window)
 	if !render.rect_contains(bounds, x, y) {
 		return
 	}
@@ -407,6 +460,38 @@ select_at_pointer :: proc(
 	// Clicking empty timeline moves the playhead without changing the
 	// selection, which is how a user scrubs to a moment between events.
 	apply(state, trace, Command{kind = .Set_Playhead, time_ns = ui.x_to_time(state.viewport, x)})
+}
+
+// select_in_map focuses the file under a click on the repository map.
+@(private)
+select_in_map :: proc(
+	window: ^Window,
+	state: ^State,
+	trace: ^codec.Trace,
+	x, y: f32,
+) {
+	graph := window.graph
+	if graph == nil {
+		return
+	}
+
+	entity, found := ui.hit_test_map(
+		ui.Map_State {
+			bounds = map_bounds(window),
+			scale = window.scale,
+			filter = state.map_filter,
+		},
+		graph,
+		x,
+		y,
+	)
+	if !found {
+		return
+	}
+
+	state.selection.focus_kind = .Entity
+	state.selection.focus_entity = entity
+	state.revision += 1
 }
 
 @(private)
@@ -544,6 +629,7 @@ draw_frame :: proc(
 	index: ui.Timeline_Index,
 	outcomes: ^analysis.Outcome_Index,
 	session: ^Replay_Session,
+	graph: ^analysis.Graph,
 ) {
 	// docs/01: dragging the playhead updates the virtual repository and all
 	// derived panels. Seeking here, before any panel reads it, is what keeps
@@ -618,6 +704,25 @@ draw_frame :: proc(
 			},
 			trace,
 			outcomes,
+		)
+	}
+
+	if map_visible(window) {
+		ui.draw_map(
+			&window.list,
+			ui.Map_State {
+				bounds = map_bounds(window),
+				theme = ui.DARK_MAP,
+				fonts = &window.fonts if window.fonts_loaded else nil,
+				atlas = atlas,
+				scale = window.scale,
+				selection = state.selection.focus_entity,
+				focus = state.selection.focus_entity,
+				has_focus = false,
+				filter = state.map_filter,
+			},
+			graph,
+			trace,
 		)
 	}
 

@@ -2,6 +2,7 @@ package app
 
 import "src:trace/codec"
 import "src:trace/model"
+import "src:analysis"
 import "src:ui"
 
 // Commands.
@@ -223,6 +224,8 @@ State :: struct {
 	diff_scroll_lines: int,
 	// Which comparison the diff panel shows.
 	diff_mode: ui.Diff_Mode,
+	// Which activity categories the repository map shows.
+	map_filter: analysis.Node_Filter,
 
 	// Set when the user asked to quit.
 	quitting: bool,

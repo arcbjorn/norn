@@ -41,7 +41,7 @@ and native UI are not built yet.
 | Event inspector with evidence stack | Implemented |
 | Line diffing and the diff viewer panel | Implemented |
 | All four diff comparison modes | Implemented |
-| Repository map panel | Not started |
+| Deterministic graph layout and repository map | Implemented |
 | Replay driven from the playhead | Implemented |
 
 Replay currently starts from an empty baseline, because capturing a repository
@@ -107,6 +107,8 @@ reconstructs its content at the playhead in the panel below, labelled with how
 much replay could verify. `D` cycles the four comparisons from
 [User experience](docs/01-user-experience.md): state at the playhead, since the
 previous change, since session start, and across the bracket-selected range.
+The repository map on the left shows the files a session touched, sized by
+activity and coloured by outcome; clicking one focuses it.
 
 `explain` is the diagnosis workflow: select a failed outcome and it reports the
 evidence behind it, separated into explicit, reconstructed, and inferred
@@ -133,17 +135,17 @@ src/
     model/       canonical semantic types, interning, blobs
     codec/       .norn reader, writer, and validator
   replay/        virtual repository, patching, seeking, comparison, diffing
-  analysis/      outcomes, comparability, scoring, evidence, attempts
+  analysis/      outcomes, comparability, scoring, evidence, attempts, graph
   app/           selection, commands, replay session, window, frame loop
   render/        draw lists, primitives, batching, fonts, WGPU backend
-  ui/            viewport transforms, virtualization, timeline, inspector, diff
+  ui/            viewport transforms, virtualization, and the four panels
   export/        bundle assembly, HTML report, canonical JSON
 tests/
   core/    arithmetic, path safety, checksum vectors
   model/   interning and blob identity
   codec/   roundtrip, determinism, and corruption fixtures
   replay/  patching, mutation chains, seek properties, diff reconstruction
-  analysis/ comparability, scoring weights, and evidence ordering
+  analysis/ comparability, scoring weights, evidence ordering, layout
   export/  encoding, injection resistance, and determinism
   render/  draw list culling, clipping, batching, glyph atlases
   ui/      transform inverses, virtualization, and drawn output
@@ -191,5 +193,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-340 tests across nine packages. See [Quality](docs/09-quality.md) for the
+368 tests across nine packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.
