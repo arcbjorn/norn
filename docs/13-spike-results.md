@@ -449,3 +449,40 @@ Disabling `sanitize_text` therefore did not fail the suite, which is the honest
 result rather than a gap: nothing reaches it. The check asserts the property a
 user depends on — that a shared report parses — rather than any one of the three
 mechanisms, because all three sit in code that could change.
+
+## Baseline verification
+
+Phase 2 requires the importer to "capture and verify repository baseline
+content", and docs/06 reserves the verified label for content "verified against
+recorded hashes".
+
+Capture wrote `entry.digest` from the first version. Nothing read it. The
+manifest kind alone decided the label, so an entry whose digest contradicted the
+blob it named was reported **Verified** — the strongest claim Norn makes, about
+bytes it had never checked. The field was dead, which is the failure mode worth
+noting: writing a hash is not verifying one, and the code looked complete.
+
+Now `baseline_apply` takes a content resolver and checks each entry. A mismatch
+is a **gap**, not a downgrade: the manifest and the blob table disagreeing means
+one of them is wrong and Norn cannot tell which, so showing the bytes under a
+weaker label would present content that may belong to a different file. A nil
+resolver downgrades everything to Unverified rather than trusting the manifest —
+a caller that cannot check has not checked.
+
+Traces predating the digest still replay, under Unverified.
+
+### It costs nothing measurable
+
+Verification hashes every baseline file on `engine_reset`, and backward seeking
+resets often, so this looked like it might matter. Measured against a trace with
+eight captured files of about 400 lines each:
+
+| Pattern | p50 | p95 |
+| --- | ---: | ---: |
+| forward step | 0.008 ms | 0.019 ms |
+| backward step | 1.091 ms | 2.026 ms |
+| seek + resolve | 0.575 ms | 1.588 ms |
+
+Still two orders of magnitude inside the 100 ms budget. Snapshot restores avoid
+most resets, so the hashing happens far less often than the seek pattern
+suggests.
