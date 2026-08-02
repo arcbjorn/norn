@@ -33,6 +33,8 @@ main :: proc() {
 	rest := arguments[1:]
 
 	switch command {
+	case "import":
+		os.exit(command_import(rest))
 	case "inspect":
 		os.exit(command_inspect(rest))
 	case "validate":
@@ -61,6 +63,7 @@ print_usage :: proc(to_stderr: bool) {
 
 Usage:
   norn open <trace.norn>
+  norn import <source> --repo <path> [--format <id>] [--out file.norn]
   norn inspect <trace.norn> [--json]
   norn validate <trace.norn> [--mode quick|full|replay]
   norn explain <trace.norn> --event <id>
@@ -72,8 +75,9 @@ Export includes file paths, diffs, command lines, and evidence by default.
 Prompt text and command output are excluded unless --include-messages or
 --include-output is given.
 
-Commands not yet implemented in this build:
-  norn import <source> --repo <path> [--format codex] [--out file.norn]
+Import reads a source log and writes a .norn trace. It never executes the
+source or anything named inside it. Use --dry-run to report what a source
+contains without writing output.
 
 Exit codes:
   0  success
