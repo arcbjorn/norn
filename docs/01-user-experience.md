@@ -88,7 +88,15 @@ Keyboard controls:
 | Space | Play or pause automatic traversal |
 | `[` / `]` | Set comparison range start or end |
 | `F` | Focus selected entity across panels |
-| Escape | Clear focus, then clear range |
+| `/` | Open search |
+| `N` / Shift + `N` | Next or previous match, when search is closed |
+| Return / Shift + Return | Next or previous match, while typing |
+| Escape | Close search, then clear focus, then clear range |
+
+While the search field has focus it receives every printable key, so `N` and
+`D` type rather than navigate; Return steps matches in their place. Keys that
+cannot appear in a query — arrows, brackets, and modified shortcuts — keep
+their bindings, so opening search never traps the user in the field.
 
 Playback is an inspection aid, not a video. It advances between meaningful
 events and scales long idle gaps down.
