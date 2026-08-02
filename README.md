@@ -29,7 +29,8 @@ and native UI are not built yet.
 | Attempt and retry-loop detection | Implemented |
 | Redacted HTML and canonical JSON export | Implemented |
 | `norn inspect` / `validate` / `explain` / `export` | Implemented |
-| Codex importer | Not started |
+| Importer contract, record sink, redaction | Implemented |
+| Codex adapter (needs sanitized fixtures) | Not started |
 | Annotation overlays and bookmarks | Not started |
 | SDL3 + WGPU stack validation (decision 002) | Confirmed |
 | Text rendering and glyph atlas validation | Confirmed |
@@ -140,6 +141,8 @@ src/
   render/        draw lists, primitives, batching, fonts, WGPU backend
   ui/            viewport transforms, virtualization, and the four panels
   export/        bundle assembly, HTML report, canonical JSON
+  importers/
+    api/         adapter contract, record sink, redaction
 tests/
   core/    arithmetic, path safety, checksum vectors
   model/   interning and blob identity
@@ -147,6 +150,7 @@ tests/
   replay/  patching, mutation chains, seek properties, diff reconstruction
   analysis/ comparability, scoring weights, evidence ordering, layout
   export/  encoding, injection resistance, and determinism
+  importers/ redaction rules, sink invariants, detection
   render/  draw list culling, clipping, batching, glyph atlases
   ui/      transform inverses, virtualization, and drawn output
   app/     command routing, keyboard bindings, playback, playhead replay
@@ -193,5 +197,5 @@ session never had, and the user could not tell by looking.
 scripts/norn.sh test
 ```
 
-368 tests across nine packages. See [Quality](docs/09-quality.md) for the
+401 tests across ten packages. See [Quality](docs/09-quality.md) for the
 intended test layers and release gates.

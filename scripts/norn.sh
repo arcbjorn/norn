@@ -63,7 +63,7 @@ profile_flags() {
 
 # Packages that contain tests, in dependency order.
 test_packages() {
-	echo "core model codec replay analysis export render ui app"
+	echo "core model codec replay analysis export render ui app importers"
 }
 
 test_package_path() {
@@ -77,6 +77,7 @@ test_package_path() {
 		render) echo "tests/render" ;;
 		ui)     echo "tests/ui" ;;
 		app)    echo "tests/app" ;;
+		importers) echo "tests/importers" ;;
 		*)
 			echo "error: unknown test package '${1}'" >&2
 			exit 2
